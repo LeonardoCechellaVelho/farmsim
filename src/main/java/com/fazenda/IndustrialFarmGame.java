@@ -9,6 +9,9 @@ import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
+import javafx.scene.shape.ArcType;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
 
 import java.util.HashSet;
@@ -16,27 +19,30 @@ import java.util.Set;
 
 public class IndustrialFarmGame extends Application {
 
-    private static final int TILE_SIZE = 24;
+    private static final int TILE_SIZE = 12;
     private static final int WIDTH = 1000;
     private static final int HEIGHT = 700;
 
     private Image tractorSheet;
-    private final double SPRITE_W = 256;
-    private final double SPRITE_H = 256;
-    private final double TRACTOR_SCALE = 0.4;
+    private final double SPRITE_W = 931.0 / 6.0;
+    private final double SPRITE_H = 472.0 / 4.0;
+    
+    // --- TAMANHO REDUZIDO AQUI ---
+    private final double TRACTOR_SCALE = 0.4; 
 
     private double tractorX = 500, tractorY = 500;
-    private double angle = 45; // Começa no Sul Isométrico
+    private double angle = 45; 
     private double currentSpeed = 0;
 
-    private final double MAX_SPEED = 2.5;
-    private final double ACCELERATION = 0.05;
-    private final double FRICTION = 0.03;
-    private final double ROTATION_SPEED = 2.5; // Um pouco mais rápido para melhor resposta
+    private final double MAX_SPEED = 1.3;
+    private final double ACCELERATION = 0.005;
+    private final double FRICTION = 0.004;
+    private final double BRAKE_FORCE = 0.025;
+    private final double BASE_ROTATION = 1.5;
 
     private double cameraX, cameraY;
     private Set<KeyCode> activeKeys = new HashSet<>();
-    private int[][] farmMap = new int[100][100];
+    private int[][] farmMap = new int[200][200];
 
     @Override
     public void start(Stage stage) {
@@ -62,25 +68,32 @@ public class IndustrialFarmGame extends Application {
             }
         }.start();
 
-        stage.setTitle("Farm Simulator - Orientação Isométrica Corrigida");
+        stage.setTitle("Farm Simulator - Trator Reduzido");
         stage.setScene(scene);
         stage.show();
     }
 
     private void update() {
-        if (activeKeys.contains(KeyCode.W))
+        if (activeKeys.contains(KeyCode.W)) {
             currentSpeed = Math.min(currentSpeed + ACCELERATION, MAX_SPEED);
-        else if (activeKeys.contains(KeyCode.S))
-            currentSpeed = Math.max(currentSpeed - ACCELERATION, -MAX_SPEED / 2);
-        else
+        } else if (activeKeys.contains(KeyCode.S)) {
+            if (currentSpeed > 0)
+                currentSpeed = Math.max(currentSpeed - BRAKE_FORCE, 0);
+            else
+                currentSpeed = Math.max(currentSpeed - ACCELERATION, -MAX_SPEED / 3);
+        } else {
             currentSpeed *= (1 - FRICTION);
+            if (Math.abs(currentSpeed) < 0.005)
+                currentSpeed = 0;
+        }
 
-        if (Math.abs(currentSpeed) > 0.1) {
+        if (Math.abs(currentSpeed) > 0.02) {
             double directionFactor = currentSpeed > 0 ? 1 : -1;
+            double turnAbility = Math.min(Math.abs(currentSpeed) * 1.5, BASE_ROTATION);
             if (activeKeys.contains(KeyCode.A))
-                angle -= ROTATION_SPEED * directionFactor;
+                angle -= turnAbility * directionFactor;
             if (activeKeys.contains(KeyCode.D))
-                angle += ROTATION_SPEED * directionFactor;
+                angle += turnAbility * directionFactor;
         }
 
         double radians = Math.toRadians(angle);
@@ -108,7 +121,7 @@ public class IndustrialFarmGame extends Application {
             for (int col = 0; col < farmMap[row].length; col++) {
                 double isoX = (col * TILE_SIZE - row * TILE_SIZE);
                 double isoY = (col * TILE_SIZE + row * TILE_SIZE) / 2.0;
-                if (isoX > cameraX - 100 && isoX < cameraX + WIDTH + 100 &&
+                if (isoX > cameraX - 50 && isoX < cameraX + WIDTH + 50 &&
                         isoY > cameraY - 100 && isoY < cameraY + HEIGHT + 100) {
                     drawIsoTile(gc, isoX, isoY, farmMap[row][col] == 1 ? Color.web("#3d2611") : Color.web("#2d4c21"));
                 }
@@ -119,12 +132,12 @@ public class IndustrialFarmGame extends Application {
         gc.restore();
 
         renderCompass(gc);
-        renderUI(gc);
+        renderSpeedometer(gc);
     }
 
     private void drawIsoTile(GraphicsContext gc, double x, double y, Color color) {
         gc.setFill(color);
-        gc.setStroke(Color.web("#000000", 0.05));
+        gc.setStroke(Color.web("#000000", 0.03));
         double[] xs = { x, x + TILE_SIZE, x, x - TILE_SIZE };
         double[] ys = { y, y + TILE_SIZE / 2.0, y + TILE_SIZE, y + TILE_SIZE / 2.0 };
         gc.fillPolygon(xs, ys, 4);
@@ -132,39 +145,29 @@ public class IndustrialFarmGame extends Application {
     }
 
     private void renderIsoTractor(GraphicsContext gc, double x, double y) {
-        if (tractorSheet == null)
-            return;
+        if (tractorSheet == null) return;
 
-        // Normaliza o ângulo entre 0 e 360
-        double normalizedAngle = (angle % 360 + 360) % 360;
+        double normAngle = (angle % 360 + 360) % 360;
+        double frameAngle = (90 - normAngle) % 360;
+        if (frameAngle < 0) frameAngle += 360;
 
-        int spritePos;
+        int index = (int) Math.floor((frameAngle + 7.5) / 15.0) % 24;
 
-        // Agora os limites são as "quinas" (45, 135, 225, 315)
-        // Cada imagem agora cobre um quadrante centralizado nos eixos isométricos
-        if (normalizedAngle >= 45 && normalizedAngle < 135) {
-            spritePos = 2; // OESTE (Diagonal inferior esquerda)
-        } else if (normalizedAngle >= 135 && normalizedAngle < 225) {
-            spritePos = 3; // NORTE (Diagonal superior esquerda)
-        } else if (normalizedAngle >= 225 && normalizedAngle < 315) {
-            spritePos = 1; // LESTE (Diagonal superior direita)
-        } else {
-            // De 315 a 360 E de 0 a 45
-            spritePos = 0; // SUL (Diagonal inferior direita)
-        }
+        int col = index % 6;
+        int row = index / 6;
 
-        int col = spritePos % 2;
-        int row = spritePos / 2;
         double drawW = SPRITE_W * TRACTOR_SCALE;
         double drawH = SPRITE_H * TRACTOR_SCALE;
 
         gc.save();
         gc.translate(x, y);
 
-        // Desenha o trator centralizado no ponto X, Y
+        // Renderiza o trator
+        // Ajustei o offset vertical (-drawH * 0.9) para garantir que o trator 
+        // menor fique bem assentado no chão isométrico.
         gc.drawImage(tractorSheet,
                 col * SPRITE_W, row * SPRITE_H, SPRITE_W, SPRITE_H,
-                -drawW / 2.0, -drawH * 0.85,
+                -drawW / 2.0, -drawH * 0.9,
                 drawW, drawH);
         gc.restore();
     }
@@ -173,11 +176,9 @@ public class IndustrialFarmGame extends Application {
         double cx = WIDTH - 80, cy = 80, r = 50;
         gc.setFill(Color.web("#333333", 0.8));
         gc.fillOval(cx - r, cy - r, r * 2, r * 2);
-
         gc.save();
         gc.translate(cx, cy);
         gc.rotate(angle + 135);
-
         gc.setFill(Color.RED);
         gc.fillPolygon(new double[] { -6, 0, 6 }, new double[] { 0, -r + 12, 0 }, 3);
         gc.setFill(Color.WHITE);
@@ -185,12 +186,39 @@ public class IndustrialFarmGame extends Application {
         gc.restore();
     }
 
-    private void renderUI(GraphicsContext gc) {
+    private void renderSpeedometer(GraphicsContext gc) {
+        double cx = WIDTH - 100, cy = HEIGHT - 80, r = 70;
+        gc.setFill(Color.web("#111111", 0.95));
+        gc.fillArc(cx - r, cy - r, r * 2, r * 2, 0, 180, ArcType.ROUND);
+
+        String gear = "N";
+        if (currentSpeed > 0.01) {
+            if (currentSpeed < MAX_SPEED * 0.35) gear = "1";
+            else if (currentSpeed < MAX_SPEED * 0.75) gear = "2";
+            else gear = "3";
+        } else if (currentSpeed < -0.01) gear = "R";
+
+        gc.setFill(Color.web("#222222"));
+        gc.fillOval(cx - 20, cy - 20, 40, 40);
+        gc.setStroke(Color.ORANGE);
+        gc.strokeOval(cx - 20, cy - 20, 40, 40);
         gc.setFill(Color.WHITE);
-        gc.fillText("Ângulo: " + (int) ((angle % 360 + 360) % 360) + "°", 20, 30);
+        gc.setFont(Font.font("Monospaced", FontWeight.BOLD, 24));
+        gc.fillText(gear, cx - 7, cy + 8);
+
+        double speedPercent = Math.abs(currentSpeed) / MAX_SPEED;
+        gc.save();
+        gc.translate(cx, cy);
+        gc.rotate(-180 + (180 * speedPercent));
+        gc.setStroke(Color.RED);
+        gc.setLineWidth(4);
+        gc.strokeLine(20, 0, r - 10, 0);
+        gc.restore();
+
+        gc.setFill(Color.CYAN);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        gc.fillText((int) (Math.abs(currentSpeed) * 35) + " km/h", cx - 25, cy + 35);
     }
 
-    public static void main(String[] args) {
-        launch(args);
-    }
+    public static void main(String[] args) { launch(args); }
 }

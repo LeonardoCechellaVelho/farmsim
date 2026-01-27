@@ -13,7 +13,6 @@ import javafx.scene.shape.ArcType;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
 import javafx.stage.Stage;
-
 import java.util.HashSet;
 import java.util.Set;
 
@@ -24,8 +23,13 @@ public class IndustrialFarmGame extends Application {
     private static final int HEIGHT = 700;
     private static final int MAP_SIZE = 200;
 
-    private int[][] savedMap = null;
+    private Image imgPlowed, imgRoad, imgRoadBorder;
+    private Image[] grassVariants = new Image[64];
+    private Image[] darkGrassVariants = new Image[64];
 
+    private int[][] noiseMap = new int[MAP_SIZE][MAP_SIZE];
+    private javafx.scene.image.WritableImage miniMapImage = new javafx.scene.image.WritableImage(MAP_SIZE, MAP_SIZE);
+    private int lastPlowCol = -1, lastPlowRow = -1;
     private Image tractorSheet;
     private final double SPRITE_W = 931.0 / 6.0;
     private final double SPRITE_H = 472.0 / 4.0;
@@ -53,18 +57,19 @@ public class IndustrialFarmGame extends Application {
 
     @Override
     public void start(Stage stage) {
+        createTileCache();
+
+        for (int r = 0; r < MAP_SIZE; r++) {
+            for (int c = 0; c < MAP_SIZE; c++) {
+                noiseMap[r][c] = (int) (getNoise(r, c) * 63);
+                miniMapImage.getPixelWriter().setColor(c, r, Color.TRANSPARENT);
+            }
+        }
+
         try {
             tractorSheet = new Image(getClass().getResourceAsStream("/trator.png"));
         } catch (Exception e) {
             System.err.println("Erro: 'trator.png' não encontrado.");
-        }
-
-        if (savedMap != null) {
-            for (int r = 0; r < Math.min(savedMap.length, MAP_SIZE); r++) {
-                for (int c = 0; c < Math.min(savedMap[r].length, MAP_SIZE); c++) {
-                    farmMap[r][c] = savedMap[r][c];
-                }
-            }
         }
 
         Canvas canvas = new Canvas(WIDTH, HEIGHT);
@@ -72,13 +77,8 @@ public class IndustrialFarmGame extends Application {
         StackPane root = new StackPane(canvas);
         Scene scene = new Scene(root);
 
-        canvas.setOnMouseDragged(e -> editMap(e.getX(), e.getY(), e.isPrimaryButtonDown()));
-        canvas.setOnMousePressed(e -> editMap(e.getX(), e.getY(), e.isPrimaryButtonDown()));
-
         scene.setOnKeyPressed(e -> {
             activeKeys.add(e.getCode());
-            if (e.getCode() == KeyCode.P)
-                exportMapToCode();
             if (e.getCode() == KeyCode.C)
                 toggleCouping();
         });
@@ -92,56 +92,63 @@ public class IndustrialFarmGame extends Application {
             }
         }.start();
 
-        stage.setTitle("Farm Simulator - C: Acoplar/Desacoplar | P: Exportar");
+        stage.setTitle("Farm Simulator - Estilos Restaurados");
         stage.setScene(scene);
         stage.show();
     }
 
+    private void createTileCache() {
+        imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, null);
+        imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, null);
+        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, null);
+
+        Color grassColor = Color.web("#2d4c21");
+        Color bladeColor = Color.web("#3a5f27");
+        Color darkGrassColor = Color.web("#1a2b13");
+        Color darkBladeColor = Color.web("#233a1a");
+
+        for (int i = 0; i < 64; i++) {
+            grassVariants[i] = createSingleTileImage(grassColor, i, true, bladeColor);
+            darkGrassVariants[i] = createSingleTileImage(darkGrassColor, i, true, darkBladeColor);
+        }
+    }
+
+    private Image createSingleTileImage(Color baseColor, int seed, boolean hasGrass, Color bColor) {
+        int w = TILE_SIZE * 2;
+        int h = TILE_SIZE + 15;
+        Canvas temp = new Canvas(w, h);
+        GraphicsContext tgc = temp.getGraphicsContext2D();
+        double off = 10;
+        double[] xs = { TILE_SIZE, TILE_SIZE * 2, TILE_SIZE, 0 };
+        double[] ys = { off, TILE_SIZE / 2.0 + off, TILE_SIZE + off, TILE_SIZE / 2.0 + off };
+        tgc.setFill(baseColor);
+        tgc.fillPolygon(xs, ys, 4);
+        if (hasGrass && bColor != null) {
+            java.util.Random rng = new java.util.Random(seed);
+            int count = 6 + rng.nextInt(6);
+            for (int i = 0; i < count; i++) {
+                double rx = 4 + rng.nextDouble() * (TILE_SIZE * 1.5),
+                        ry = off + 2 + rng.nextDouble() * (TILE_SIZE / 2.0);
+                double gh = 3 + rng.nextDouble() * 5, bend = -2 + rng.nextDouble() * 4;
+                tgc.setStroke(bColor.deriveColor(rng.nextDouble() * 10 - 5, 1, 0.8 + rng.nextDouble() * 0.4, 1));
+                tgc.setLineWidth(1.0 + rng.nextDouble() * 0.5);
+                tgc.strokeLine(rx, ry, rx + bend, ry - gh);
+            }
+        }
+        javafx.scene.SnapshotParameters p = new javafx.scene.SnapshotParameters();
+        p.setFill(Color.TRANSPARENT);
+        return temp.snapshot(p, null);
+    }
+
     private void toggleCouping() {
-        if (isAttached) {
+        if (isAttached)
             isAttached = false;
-        } else {
+        else {
             double backX = tractorX - Math.cos(Math.toRadians(angle)) * 30;
             double backY = tractorY - Math.sin(Math.toRadians(angle)) * 30;
-            double dx = backX - trailerX;
-            double dy = backY - trailerY;
-            double dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist < 35)
+            if (Math.sqrt(Math.pow(backX - trailerX, 2) + Math.pow(backY - trailerY, 2)) < 35)
                 isAttached = true;
         }
-    }
-
-    private void editMap(double mouseX, double mouseY, boolean isAdd) {
-        double worldX = mouseX + cameraX;
-        double worldY = mouseY + cameraY;
-        int col = (int) ((worldY + worldX / 2.0) / TILE_SIZE);
-        int row = (int) ((worldY - worldX / 2.0) / TILE_SIZE);
-        if (row >= 0 && row < MAP_SIZE && col >= 17 && col < MAP_SIZE) {
-            farmMap[row][col] = isAdd ? 1 : 0;
-        }
-    }
-
-    private void exportMapToCode() {
-        System.out.println("\n--- CÓDIGO EXPORTADO ---");
-        StringBuilder sb = new StringBuilder("savedMap = new int[][]{\n");
-        for (int r = 0; r < MAP_SIZE; r++) {
-            boolean hasData = false;
-            for (int c = 0; c < MAP_SIZE; c++) {
-                if (farmMap[r][c] == 1) {
-                    hasData = true;
-                    break;
-                }
-            }
-            if (hasData) {
-                sb.append("  {");
-                for (int c = 0; c < MAP_SIZE; c++) {
-                    sb.append(farmMap[r][c]).append(c == MAP_SIZE - 1 ? "" : ",");
-                }
-                sb.append("},\n");
-            }
-        }
-        sb.append("};");
-        System.out.println(sb.toString());
     }
 
     private void update() {
@@ -160,121 +167,112 @@ public class IndustrialFarmGame extends Application {
 
         if (Math.abs(currentSpeed) > 0.01) {
             double dir = currentSpeed > 0 ? 1 : -1;
-            double turnAbility = Math.min(Math.abs(currentSpeed) * 1.2, BASE_ROTATION);
+            double turn = Math.min(Math.abs(currentSpeed) * 1.2, BASE_ROTATION);
             if (activeKeys.contains(KeyCode.A))
-                angle -= turnAbility * dir;
+                angle -= turn * dir;
             if (activeKeys.contains(KeyCode.D))
-                angle += turnAbility * dir;
+                angle += turn * dir;
         }
 
         double diff = angle - smoothedAngle;
-        while (diff < -180) diff += 360;
-        while (diff > 180) diff -= 360;
+        while (diff < -180)
+            diff += 360;
+        while (diff > 180)
+            diff -= 360;
         smoothedAngle += diff * 0.25;
 
-        double radians = Math.toRadians(angle);
-        double nextX = tractorX + Math.cos(radians) * currentSpeed;
-        double nextY = tractorY + Math.sin(radians) * currentSpeed;
+        double nextX = tractorX + Math.cos(Math.toRadians(angle)) * currentSpeed;
+        double nextY = tractorY + Math.sin(Math.toRadians(angle)) * currentSpeed;
+        double limit = (MAP_SIZE - 1) * TILE_SIZE;
 
-        if (!isAttached) {
-            double dx = nextX - trailerX;
-            double dy = nextY - trailerY;
-            double distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance < 45) {
-                double pushAngle = Math.atan2(dy, dx);
-                nextX = trailerX + Math.cos(pushAngle) * 45;
-                nextY = trailerY + Math.sin(pushAngle) * 45;
-                currentSpeed *= 0.5;
-            }
+        if (nextX >= 0 && nextX <= limit && nextY >= 0 && nextY <= limit) {
+            tractorX = nextX;
+            tractorY = nextY;
+        } else {
+            currentSpeed *= 0.5;
         }
 
-        tractorX = nextX;
-        tractorY = nextY;
-
         if (isAttached) {
-            double dx = tractorX - trailerX;
-            double dy = tractorY - trailerY;
-            double dist = Math.sqrt(dx * dx + dy * dy);
-            double angleToTractor = Math.toDegrees(Math.atan2(dy, dx));
-
+            double dx = tractorX - trailerX, dy = tractorY - trailerY, dist = Math.sqrt(dx * dx + dy * dy);
             if (dist != TRAILER_DISTANCE) {
-                double diffDist = dist - TRAILER_DISTANCE;
-                trailerX += Math.cos(Math.atan2(dy, dx)) * diffDist;
-                trailerY += Math.sin(Math.atan2(dy, dx)) * diffDist;
-
-                double adiff = angleToTractor - trailerAngle;
-                while (adiff < -180) adiff += 360;
-                while (adiff > 180) adiff -= 360;
-
-                if (Math.abs(currentSpeed) > 0.05) {
-                    double factor = (currentSpeed > 0) ? 0.15 : 0.4;
-                    trailerAngle += adiff * factor;
-                }
+                double f = dist - TRAILER_DISTANCE;
+                trailerX += Math.cos(Math.atan2(dy, dx)) * f;
+                trailerY += Math.sin(Math.atan2(dy, dx)) * f;
+                double adiff = Math.toDegrees(Math.atan2(dy, dx)) - trailerAngle;
+                while (adiff < -180)
+                    adiff += 360;
+                while (adiff > 180)
+                    adiff -= 360;
+                if (Math.abs(currentSpeed) > 0.05)
+                    trailerAngle += adiff * (currentSpeed > 0 ? 0.15 : 0.4);
             }
 
-            if (Math.abs(currentSpeed) > 0.1) {
-                int tx = (int) (trailerX / TILE_SIZE);
-                int ty = (int) (trailerY / TILE_SIZE);
+            int tx = (int) (trailerX / TILE_SIZE), ty = (int) (trailerY / TILE_SIZE);
+            if (tx != lastPlowCol || ty != lastPlowRow) {
+                lastPlowCol = tx;
+                lastPlowRow = ty;
                 for (int i = -3; i <= 3; i++) {
                     for (int j = -3; j <= 3; j++) {
                         int nx = tx + i, ny = ty + j;
-                        if (ny >= 0 && ny < MAP_SIZE && nx >= 17 && nx < MAP_SIZE)
-                            farmMap[ny][nx] = 1;
+                        if (ny >= 5 && ny < MAP_SIZE - 5 && nx >= 17 && nx < MAP_SIZE - 5) {
+                            if (farmMap[ny][nx] == 0) {
+                                farmMap[ny][nx] = 1;
+                                miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#5d3a1a"));
+                            }
+                        }
                     }
                 }
             }
         }
-
         cameraX = (tractorX - tractorY) - WIDTH / 2.0;
         cameraY = (tractorX + tractorY) / 2.0 - HEIGHT / 2.0;
     }
 
-    private void render(GraphicsContext gc) {
-        gc.setFill(Color.web("#142a0d"));
-        gc.fillRect(0, 0, WIDTH, HEIGHT);
+    private double getNoise(int x, int y) {
+        int n = x * 45291 + y * 94607;
+        n = (n << 13) ^ n;
+        return (1.0 - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0 + 1.0) / 2.0;
+    }
 
+    private void render(GraphicsContext gc) {
+        gc.setFill(Color.web("#0d1a0a"));
+        gc.fillRect(0, 0, WIDTH, HEIGHT);
         gc.save();
         gc.translate(-cameraX, -cameraY);
 
-        int centerCol = (int) (tractorX / TILE_SIZE);
-        int centerRow = (int) (tractorY / TILE_SIZE);
-        int viewRadius = 45;
-
-        for (int row = Math.max(0, centerRow - viewRadius); row <= Math.min(MAP_SIZE - 1, centerRow + viewRadius); row++) {
-            for (int col = Math.max(0, centerCol - viewRadius); col <= Math.min(MAP_SIZE - 1, centerCol + viewRadius); col++) {
-                double isoX = (col * TILE_SIZE - row * TILE_SIZE);
-                double isoY = (col * TILE_SIZE + row * TILE_SIZE) / 2.0;
-
-                if (isoX > cameraX - 100 && isoX < cameraX + WIDTH + 100 && isoY > cameraY - 100 && isoY < cameraY + HEIGHT + 100) {
-                    
-                    if (col < 2) gc.setFill(Color.web("#808080")); 
-                    else if (col >= 2 && col < 10) gc.setFill(Color.web("#2c2c2c")); 
-                    else if (col >= 10 && col < 12) gc.setFill(Color.web("#808080")); 
-                    else if (col >= 12 && col < 17) gc.setFill((row + col) % 2 == 0 ? Color.web("#1b3011") : Color.web("#1e3613"));
-                    else gc.setFill(farmMap[row][col] == 1 ? Color.web("#3d2611") : Color.web("#2d4c21"));
-
-                    gc.fillPolygon(new double[] { isoX, isoX + TILE_SIZE, isoX, isoX - TILE_SIZE },
-                                   new double[] { isoY, isoY + TILE_SIZE / 2, isoY + TILE_SIZE, isoY + TILE_SIZE / 2 }, 4);
+        int cCol = (int) (tractorX / TILE_SIZE), cRow = (int) (tractorY / TILE_SIZE), rad = 45;
+        for (int r = Math.max(0, cRow - rad); r <= Math.min(MAP_SIZE - 1, cRow + rad); r++) {
+            for (int c = Math.max(0, cCol - rad); c <= Math.min(MAP_SIZE - 1, cCol + rad); c++) {
+                double ix = (c * TILE_SIZE - r * TILE_SIZE), iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
+                if (ix > cameraX - 50 && ix < cameraX + WIDTH + 50 && iy > cameraY - 50 && iy < cameraY + HEIGHT + 50) {
+                    Image img;
+                    int margin = 5;
+                    if (c < 12) {
+                        if (c < 2 || c >= 10)
+                            img = imgRoadBorder;
+                        else
+                            img = imgRoad;
+                    } else if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
+                        img = darkGrassVariants[noiseMap[r][c]];
+                    } else {
+                        img = (farmMap[r][c] == 1) ? imgPlowed : grassVariants[noiseMap[r][c]];
+                    }
+                    gc.drawImage(img, Math.floor(ix - TILE_SIZE), Math.floor(iy - 10));
                 }
             }
         }
 
-        // --- LINHAS DE TRÂNSITO VETORIAIS (Contínuas de fora a fora) ---
-        drawRoadLine(gc, 5.8, Color.web("#f1c40f"), 2); // Linha amarela 1 (centro)
-        drawRoadLine(gc, 6.2, Color.web("#f1c40f"), 2); // Linha amarela 2 (centro)
-        drawRoadLine(gc, 2.2, Color.WHITE, 1.5);       // Linha branca (acostamento esquerdo)
+        drawRoadLine(gc, 5.8, Color.web("#f1c40f"), 2);
+        drawRoadLine(gc, 6.2, Color.web("#f1c40f"), 2);
+        drawRoadLine(gc, 2.2, Color.WHITE, 1.5);
 
         if (isAttached) {
-            double xTractor = (tractorX - tractorY);
-            double yTractor = (tractorX + tractorY) / 2.0 - 10;
-            double frontOffset = 5;
-            double frontX = trailerX + Math.cos(Math.toRadians(trailerAngle)) * frontOffset;
-            double frontY = trailerY + Math.sin(Math.toRadians(trailerAngle)) * frontOffset;
-            double xTrailerFront = (frontX - frontY);
-            double yTrailerFront = (frontX + frontY) / 2.0;
+            double xt = (tractorX - tractorY), yt = (tractorX + tractorY) / 2.0 - 10;
+            double fx = trailerX + Math.cos(Math.toRadians(trailerAngle)) * 5,
+                    fy = trailerY + Math.sin(Math.toRadians(trailerAngle)) * 5;
             gc.setStroke(Color.BLACK);
             gc.setLineWidth(3);
-            gc.strokeLine(xTractor, yTractor, xTrailerFront, yTrailerFront);
+            gc.strokeLine(xt, yt, (fx - fy), (fx + fy) / 2.0);
         }
 
         renderPlantadoraIso(gc, trailerX, trailerY, trailerAngle);
@@ -289,23 +287,20 @@ public class IndustrialFarmGame extends Application {
         gc.fillText("Trailer: " + (isAttached ? "CONECTADO" : "SOLTO (C para acoplar)"), 20, 30);
     }
 
-    // Desenha uma linha isométrica contínua ao longo de todo o mapa
     private void drawRoadLine(GraphicsContext gc, double colPos, Color color, double width) {
         gc.setStroke(color);
         gc.setLineWidth(width);
-        double xStart = (colPos * TILE_SIZE - 0 * TILE_SIZE);
-        double yStart = (colPos * TILE_SIZE + 0 * TILE_SIZE) / 2.0;
-        double xEnd = (colPos * TILE_SIZE - (MAP_SIZE) * TILE_SIZE);
-        double yEnd = (colPos * TILE_SIZE + (MAP_SIZE) * TILE_SIZE) / 2.0;
-        gc.strokeLine(xStart, yStart + TILE_SIZE/2.0, xEnd, yEnd + TILE_SIZE/2.0);
+        double xs = (colPos * TILE_SIZE), ys = (colPos * TILE_SIZE) / 2.0;
+        double xe = (colPos * TILE_SIZE - MAP_SIZE * TILE_SIZE), ye = (colPos * TILE_SIZE + MAP_SIZE * TILE_SIZE) / 2.0;
+        gc.strokeLine(xs, ys + TILE_SIZE / 2.0, xe, ye + TILE_SIZE / 2.0);
     }
 
-    private void renderPlantadoraIso(GraphicsContext gc, double tx, double ty, double tAngle) {
-        double isoX = tx - ty;
-        double isoY = (tx + ty) / 2.0;
+    private void renderPlantadoraIso(GraphicsContext gc, double tx, double ty, double tA) {
+        double ix = tx - ty, iy = (tx + ty) / 2.0;
         gc.save();
-        gc.translate(isoX, isoY);
-        gc.rotate(tAngle + 45);
+        gc.translate(ix, iy);
+        gc.rotate(tA + 45);
+        
         gc.setFill(Color.web("#1a4a7a"));
         gc.fillRect(-7, -45, 12, 90);
         gc.setFill(Color.web("#000000", 0.2));
@@ -327,41 +322,34 @@ public class IndustrialFarmGame extends Application {
     }
 
     private void renderIsoTractor(GraphicsContext gc, double x, double y) {
-        if (tractorSheet == null) return;
-        double visualAngle = (smoothedAngle % 360 + 360) % 360;
-        double frameAngle = (90 - visualAngle + 360) % 360;
-        int index = (int) Math.floor((frameAngle + 7.5) / 15.0) % 24;
-        double drawW = SPRITE_W * TRACTOR_SCALE, drawH = SPRITE_H * TRACTOR_SCALE;
+        if (tractorSheet == null)
+            return;
+        double fa = (90 - ((smoothedAngle % 360 + 360) % 360) + 360) % 360;
+        int idx = (int) Math.floor((fa + 7.5) / 15.0) % 24;
+        double dw = SPRITE_W * TRACTOR_SCALE, dh = SPRITE_H * TRACTOR_SCALE;
         gc.save();
         gc.translate(x, y);
-        gc.drawImage(tractorSheet, (index % 6) * SPRITE_W, (index / 6) * SPRITE_H, SPRITE_W, SPRITE_H, -drawW / 2.0,
-                -drawH * 0.85, drawW, drawH);
+        gc.drawImage(tractorSheet, (idx % 6) * SPRITE_W, (idx / 6) * SPRITE_H, SPRITE_W, SPRITE_H, -dw / 2.0,
+                -dh * 0.85, dw, dh);
         gc.restore();
     }
 
     private void renderMiniMap(GraphicsContext gc) {
-        double size = 140, x = WIDTH - size - 20, y = 20;
+        double sz = 140, mx = WIDTH - sz - 20, my = 20;
         gc.setFill(Color.web("#111111", 0.85));
-        gc.fillOval(x, y, size, size);
+        gc.fillOval(mx, my, sz, sz);
         gc.save();
         gc.beginPath();
-        gc.arc(x + size / 2, y + size / 2, size / 2, size / 2, 0, 360);
+        gc.arc(mx + sz / 2, my + sz / 2, sz / 2, sz / 2, 0, 360);
         gc.clip();
-        double vRad = 25, mTile = size / (vRad * 2);
-        int sx = (int) (tractorX / TILE_SIZE - vRad), sy = (int) (tractorY / TILE_SIZE - vRad);
-        gc.setFill(Color.web("#5d3a1a"));
-        for (int i = 0; i < vRad * 2; i++) {
-            for (int j = 0; j < vRad * 2; j++) {
-                int mx = sx + i, my = sy + j;
-                if (my >= 0 && my < MAP_SIZE && mx >= 0 && mx < MAP_SIZE && farmMap[my][mx] == 1)
-                    gc.fillRect(x + i * mTile, y + j * mTile, mTile + 1, mTile + 1);
-            }
-        }
+        double vr = 25;
+        gc.drawImage(miniMapImage, (tractorX / TILE_SIZE) - vr, (tractorY / TILE_SIZE) - vr, vr * 2, vr * 2, mx, my, sz,
+                sz);
         gc.setFill(Color.YELLOW);
-        gc.fillOval(x + size / 2 - 3, y + size / 2 - 3, 6, 6);
+        gc.fillOval(mx + sz / 2 - 3, my + sz / 2 - 3, 6, 6);
         gc.restore();
         gc.setStroke(Color.WHITE);
-        gc.strokeOval(x, y, size, size);
+        gc.strokeOval(mx, my, sz, sz);
     }
 
     private void renderSpeedometer(GraphicsContext gc) {
@@ -370,19 +358,20 @@ public class IndustrialFarmGame extends Application {
         gc.fillArc(cx - r, cy - r, r * 2, r * 2, 0, 180, ArcType.ROUND);
         gc.setStroke(Color.WHITE);
         gc.setLineWidth(1.5);
+        
         for (int i = 0; i <= 180; i += 30) {
             double rad = Math.toRadians(180 - i);
             gc.strokeLine(cx + Math.cos(rad) * (r - 5), cy - Math.sin(rad) * (r - 5), cx + Math.cos(rad) * r,
                     cy - Math.sin(rad) * r);
-            int speedVal = (int) ((i / 180.0) * MAX_SPEED_KMH);
             gc.setFill(Color.GRAY);
             gc.setFont(Font.font("Arial", 10));
-            gc.fillText(String.valueOf(speedVal), cx + Math.cos(rad) * (r - 18) - 5, cy - Math.sin(rad) * (r - 18) + 5);
+            gc.fillText(String.valueOf((int) ((i / 180.0) * MAX_SPEED_KMH)), cx + Math.cos(rad) * (r - 18) - 5,
+                    cy - Math.sin(rad) * (r - 18) + 5);
         }
-        double speedKmh = (Math.abs(currentSpeed) / MAX_SPEED) * MAX_SPEED_KMH;
+        double sk = (Math.abs(currentSpeed) / MAX_SPEED) * MAX_SPEED_KMH;
         gc.setFill(Color.CYAN);
         gc.setFont(Font.font("Arial", FontWeight.BOLD, 16));
-        gc.fillText((int) speedKmh + " Km/h", cx - 30, cy + 25);
+        gc.fillText((int) sk + " Km/h", cx - 30, cy + 25);
         gc.save();
         gc.translate(cx, cy);
         gc.rotate(-180 + (180 * (Math.abs(currentSpeed) / MAX_SPEED)));

@@ -27,6 +27,12 @@ public class IndustrialFarmGame extends Application {
     private Image[] grassVariants = new Image[64];
     private Image[] darkGrassVariants = new Image[64];
 
+    private Image treeSheet;
+    private final double TREE_W = 416.0 / 4.0; // 4 colunas (assumindo 4x2 para 8 árvores)
+    private final double TREE_H = 541.0 / 2.0; // 2 linhas
+    // Se a imagem for 8 árvores em linha única, mude para: 416.0 / 8.0 e 541.0
+    private final double TREE_SCALE = 0.5; // Ajuste o tamanho visual aqui
+
     private int[][] noiseMap = new int[MAP_SIZE][MAP_SIZE];
     private javafx.scene.image.WritableImage miniMapImage = new javafx.scene.image.WritableImage(MAP_SIZE, MAP_SIZE);
     private int lastPlowCol = -1, lastPlowRow = -1;
@@ -68,6 +74,7 @@ public class IndustrialFarmGame extends Application {
 
         try {
             tractorSheet = new Image(getClass().getResourceAsStream("/trator.png"));
+            treeSheet = new Image(getClass().getResourceAsStream("/trees.png")); // Nova linha
         } catch (Exception e) {
             System.err.println("Erro: 'trator.png' não encontrado.");
         }
@@ -240,28 +247,80 @@ public class IndustrialFarmGame extends Application {
         gc.save();
         gc.translate(-cameraX, -cameraY);
 
-        int cCol = (int) (tractorX / TILE_SIZE), cRow = (int) (tractorY / TILE_SIZE), rad = 45;
-        for (int r = Math.max(0, cRow - rad); r <= Math.min(MAP_SIZE - 1, cRow + rad); r++) {
-            for (int c = Math.max(0, cCol - rad); c <= Math.min(MAP_SIZE - 1, cCol + rad); c++) {
-                double ix = (c * TILE_SIZE - r * TILE_SIZE), iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
-                if (ix > cameraX - 50 && ix < cameraX + WIDTH + 50 && iy > cameraY - 50 && iy < cameraY + HEIGHT + 50) {
-                    Image img;
-                    int margin = 5;
-                    if (c < 12) {
+        int cCol = (int) (tractorX / TILE_SIZE), cRow = (int) (tractorY / TILE_SIZE), rad = 65;
+
+        for (int r = cRow - rad; r <= cRow + rad; r++) {
+            for (int c = cCol - rad; c <= cCol + rad; c++) {
+
+                double ix = (c * TILE_SIZE - r * TILE_SIZE);
+                double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
+
+                // Frustum culling: desenha apenas o que está visível
+                if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
+                        && iy < cameraY + HEIGHT + 150) {
+
+                    Image img = null;
+                    boolean canHaveTree = false;
+                    double nVal = getNoise(r, c);
+
+                    // 1. PRIORIDADE: ESTRADA E CALÇADA (Colunas 0 a 11)
+                    // Usamos c >= 0 para garantir que ela não suma em coordenadas negativas
+                    if (c >= 0 && c < 12) {
                         if (c < 2 || c >= 10)
                             img = imgRoadBorder;
                         else
                             img = imgRoad;
-                    } else if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
-                        img = darkGrassVariants[noiseMap[r][c]];
-                    } else {
-                        img = (farmMap[r][c] == 1) ? imgPlowed : grassVariants[noiseMap[r][c]];
                     }
-                    gc.drawImage(img, Math.floor(ix - TILE_SIZE), Math.floor(iy - 10));
+                    // 2. PRIORIDADE: MAPA REAL (Plantação e Grama Clara)
+                    // Apenas se estiver dentro dos limites de MAP_SIZE e FORA da estrada
+                    else if (r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE) {
+                        int margin = 5;
+                        if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
+                            img = darkGrassVariants[noiseMap[r][c]];
+                        } else {
+                            img = (farmMap[r][c] == 1) ? imgPlowed : grassVariants[noiseMap[r][c]];
+                        }
+                    }
+                    // 3. PRIORIDADE: FLORESTA INFINITA (Tudo o que sobra)
+                    else {
+                        int dynamicNoise = (int) (nVal * 63);
+                        img = darkGrassVariants[dynamicNoise];
+                        canHaveTree = true; // Só permitimos árvores fora da fazenda e da estrada
+                    }
+
+                    // DESENHO DO CHÃO
+                    if (img != null) {
+                        gc.drawImage(img, Math.floor(ix - TILE_SIZE), Math.floor(iy - 10));
+                    }
+
+                    // DESENHO DA FLORESTA DENSA (Com Sombra)
+                    if (canHaveTree && nVal > 0.58 && treeSheet != null) {
+                        double tw = 416.0 / 4.0;
+                        double th = 541.0 / 2.0;
+                        double scale = 0.38;
+                        double dw = tw * scale;
+                        double dh = th * scale;
+
+                        double ox = (nVal * 8) - 4;
+                        double oy = (Math.sin(r * 0.5) * 3);
+
+                        // 1. DESENHO DA SOMBRA (Antes da árvore)
+                        gc.setFill(Color.rgb(0, 0, 0, 0.3)); // Preto com 30% de opacidade
+                        // Criamos uma elipse achatada na base da árvore
+                        // O deslocamento (+ dw*0.1) faz a sombra parecer vir de um lado
+                        gc.fillOval(ix - dw / 3.0 + ox + 5, iy - 5 + oy, dw * 0.8, dh * 0.2);
+
+                        // 2. DESENHO DA ÁRVORE
+                        int treeIdx = Math.abs((r * 13 + c * 7) % 8);
+                        gc.drawImage(treeSheet,
+                                (treeIdx % 4) * tw, (treeIdx / 4) * th, tw, th,
+                                ix - dw / 2.0 + ox, iy - dh + 5 + oy, dw, dh);
+                    }
                 }
             }
         }
 
+        // --- Linhas da Estrada, Trator e UI (Mantêm-se iguais) ---
         drawRoadLine(gc, 5.8, Color.web("#f1c40f"), 2);
         drawRoadLine(gc, 6.2, Color.web("#f1c40f"), 2);
         drawRoadLine(gc, 2.2, Color.WHITE, 1.5);
@@ -290,8 +349,18 @@ public class IndustrialFarmGame extends Application {
     private void drawRoadLine(GraphicsContext gc, double colPos, Color color, double width) {
         gc.setStroke(color);
         gc.setLineWidth(width);
-        double xs = (colPos * TILE_SIZE), ys = (colPos * TILE_SIZE) / 2.0;
-        double xe = (colPos * TILE_SIZE - MAP_SIZE * TILE_SIZE), ye = (colPos * TILE_SIZE + MAP_SIZE * TILE_SIZE) / 2.0;
+
+        // Fator de extensão: 10 vezes o tamanho do mapa para garantir que suma no
+        // horizonte
+        double extension = MAP_SIZE * 10;
+
+        // Ponto inicial bem longe "atrás" e ponto final bem longe "adiante"
+        double xs = (colPos * TILE_SIZE) + (extension * TILE_SIZE);
+        double ys = ((colPos * TILE_SIZE) - (extension * TILE_SIZE)) / 2.0;
+
+        double xe = (colPos * TILE_SIZE) - (extension * TILE_SIZE);
+        double ye = ((colPos * TILE_SIZE) + (extension * TILE_SIZE)) / 2.0;
+
         gc.strokeLine(xs, ys + TILE_SIZE / 2.0, xe, ye + TILE_SIZE / 2.0);
     }
 
@@ -300,7 +369,7 @@ public class IndustrialFarmGame extends Application {
         gc.save();
         gc.translate(ix, iy);
         gc.rotate(tA + 45);
-        
+
         gc.setFill(Color.web("#1a4a7a"));
         gc.fillRect(-7, -45, 12, 90);
         gc.setFill(Color.web("#000000", 0.2));
@@ -358,7 +427,7 @@ public class IndustrialFarmGame extends Application {
         gc.fillArc(cx - r, cy - r, r * 2, r * 2, 0, 180, ArcType.ROUND);
         gc.setStroke(Color.WHITE);
         gc.setLineWidth(1.5);
-        
+
         for (int i = 0; i <= 180; i += 30) {
             double rad = Math.toRadians(180 - i);
             gc.strokeLine(cx + Math.cos(rad) * (r - 5), cy - Math.sin(rad) * (r - 5), cx + Math.cos(rad) * r,

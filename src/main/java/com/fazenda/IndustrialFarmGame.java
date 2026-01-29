@@ -136,15 +136,15 @@ public class IndustrialFarmGame extends Application {
         stage.show();
     }
 
-    private void drawZoomButton(GraphicsContext gc, double x, double y, String text) {
-        double r = 11;
+    private void drawZoomButton(GraphicsContext gc, int size, double x, double y, String text) {
+        double r = 14;
         gc.setFill(Color.web("#111111"));
         gc.setStroke(Color.WHITE);
         gc.setLineWidth(1.2);
         gc.fillOval(x - r, y - r, r * 2, r * 2);
         gc.strokeOval(x - r, y - r, r * 2, r * 2);
         gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, size));
         gc.setTextAlign(TextAlignment.CENTER);
         gc.fillText(text, x, y + 5);
     }
@@ -561,8 +561,8 @@ public class IndustrialFarmGame extends Application {
         gc.strokeOval(mx, my, sz, sz);
 
         // Desenhar botões de zoom
-        drawZoomButton(gc, cx + 45, cy + 45, "+");
-        drawZoomButton(gc, cx + 15, cy + 60, "-");
+        drawZoomButton(gc, 14, cx + 50, cy + 50, "+");
+        drawZoomButton(gc, 20, cx + 20, cy + 65, "-");
     }
 
     private void renderSpeedometer(GraphicsContext gc) {

@@ -7,11 +7,14 @@ import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
 import javafx.scene.image.Image;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.ArcType;
+import javafx.scene.shape.StrokeLineCap;
 import javafx.scene.text.Font;
 import javafx.scene.text.FontWeight;
+import javafx.scene.text.TextAlignment;
 import javafx.stage.Stage;
 import java.util.HashSet;
 import java.util.Set;
@@ -23,15 +26,23 @@ public class IndustrialFarmGame extends Application {
     private static final int HEIGHT = 700;
     private static final int MAP_SIZE = 200;
 
+    private static final int TERRAIN_GRASS = 0;
+    private static final int TERRAIN_DIRT = 1;
+    private static final int TERRAIN_PLANTED = 2;
+
+    private static final int TOOL_PLOW = 0;
+    private static final int TOOL_PLANTER = 1;
+    private int currentToolType = TOOL_PLOW;
+
     private Image imgPlowed, imgRoad, imgRoadBorder;
     private Image[] grassVariants = new Image[64];
     private Image[] darkGrassVariants = new Image[64];
+    private Image[] plowedPebbleVariants = new Image[64];
+    private Image[] seedlingVariants = new Image[64];
 
     private Image treeSheet;
-    private final double TREE_W = 416.0 / 4.0; // 4 colunas (assumindo 4x2 para 8 árvores)
-    private final double TREE_H = 541.0 / 2.0; // 2 linhas
-    // Se a imagem for 8 árvores em linha única, mude para: 416.0 / 8.0 e 541.0
-    private final double TREE_SCALE = 0.5; // Ajuste o tamanho visual aqui
+    private final double TREE_W = 416.0 / 4.0;
+    private final double TREE_H = 541.0 / 2.0;
 
     private int[][] noiseMap = new int[MAP_SIZE][MAP_SIZE];
     private javafx.scene.image.WritableImage miniMapImage = new javafx.scene.image.WritableImage(MAP_SIZE, MAP_SIZE);
@@ -61,6 +72,8 @@ public class IndustrialFarmGame extends Application {
     private Set<KeyCode> activeKeys = new HashSet<>();
     private int[][] farmMap = new int[MAP_SIZE][MAP_SIZE];
 
+    private double miniMapVR = 25.0;
+
     @Override
     public void start(Stage stage) {
         createTileCache();
@@ -74,9 +87,9 @@ public class IndustrialFarmGame extends Application {
 
         try {
             tractorSheet = new Image(getClass().getResourceAsStream("/trator.png"));
-            treeSheet = new Image(getClass().getResourceAsStream("/trees.png")); // Nova linha
+            treeSheet = new Image(getClass().getResourceAsStream("/trees.png"));
         } catch (Exception e) {
-            System.err.println("Erro: 'trator.png' não encontrado.");
+            System.err.println("Erro: Imagens não encontradas (trator.png ou trees.png).");
         }
 
         Canvas canvas = new Canvas(WIDTH, HEIGHT);
@@ -88,8 +101,27 @@ public class IndustrialFarmGame extends Application {
             activeKeys.add(e.getCode());
             if (e.getCode() == KeyCode.C)
                 toggleCouping();
+            if (e.getCode() == KeyCode.Q)
+                toggleTool();
         });
+
         scene.setOnKeyReleased(e -> activeKeys.remove(e.getCode()));
+
+        scene.setOnMouseClicked(e -> {
+            if (e.getButton() == MouseButton.PRIMARY) {
+                double mx = e.getX(), my = e.getY();
+                // cx e cy são o centro do minimapa
+                double sz = 140, cx = (WIDTH - sz - 20) + sz / 2, cy = 20 + sz / 2;
+
+                // Detecta clique no botão + (miniMapVR diminui para dar mais zoom)
+                if (Math.hypot(mx - (cx + 45), my - (cy + 45)) < 12)
+                    miniMapVR = Math.max(8, miniMapVR - 4);
+
+                // Detecta clique no botão - (miniMapVR aumenta para ver mais longe)
+                if (Math.hypot(mx - (cx + 15), my - (cy + 60)) < 12)
+                    miniMapVR = Math.min(90, miniMapVR + 4);
+            }
+        });
 
         new AnimationTimer() {
             @Override
@@ -99,28 +131,49 @@ public class IndustrialFarmGame extends Application {
             }
         }.start();
 
-        stage.setTitle("Farm Simulator - Estilos Restaurados");
+        stage.setTitle("Farm Simulator - Arado e Plantadeira");
         stage.setScene(scene);
         stage.show();
     }
 
+    private void drawZoomButton(GraphicsContext gc, double x, double y, String text) {
+        double r = 11;
+        gc.setFill(Color.web("#111111"));
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(1.2);
+        gc.fillOval(x - r, y - r, r * 2, r * 2);
+        gc.strokeOval(x - r, y - r, r * 2, r * 2);
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        gc.setTextAlign(TextAlignment.CENTER);
+        gc.fillText(text, x, y + 5);
+    }
+
+    private void toggleTool() {
+        currentToolType = (currentToolType == TOOL_PLOW) ? TOOL_PLANTER : TOOL_PLOW;
+    }
+
     private void createTileCache() {
-        imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, null);
-        imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, null);
-        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, null);
+        imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, false, false, null);
+        imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, false, false, null);
+        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, false, false, null);
 
         Color grassColor = Color.web("#2d4c21");
         Color bladeColor = Color.web("#3a5f27");
         Color darkGrassColor = Color.web("#1a2b13");
         Color darkBladeColor = Color.web("#233a1a");
+        Color plowedColor = Color.web("#3d2611");
 
         for (int i = 0; i < 64; i++) {
-            grassVariants[i] = createSingleTileImage(grassColor, i, true, bladeColor);
-            darkGrassVariants[i] = createSingleTileImage(darkGrassColor, i, true, darkBladeColor);
+            grassVariants[i] = createSingleTileImage(grassColor, i, true, false, false, bladeColor);
+            darkGrassVariants[i] = createSingleTileImage(darkGrassColor, i, true, false, false, darkBladeColor);
+            plowedPebbleVariants[i] = createSingleTileImage(plowedColor, i, false, true, false, null);
+            seedlingVariants[i] = createSingleTileImage(plowedColor, i, false, false, true, null);
         }
     }
 
-    private Image createSingleTileImage(Color baseColor, int seed, boolean hasGrass, Color bColor) {
+    private Image createSingleTileImage(Color baseColor, int seed, boolean hasGrass, boolean hasPebbles,
+            boolean hasSeedling, Color detailColor) {
         int w = TILE_SIZE * 2;
         int h = TILE_SIZE + 15;
         Canvas temp = new Canvas(w, h);
@@ -128,20 +181,73 @@ public class IndustrialFarmGame extends Application {
         double off = 10;
         double[] xs = { TILE_SIZE, TILE_SIZE * 2, TILE_SIZE, 0 };
         double[] ys = { off, TILE_SIZE / 2.0 + off, TILE_SIZE + off, TILE_SIZE / 2.0 + off };
+
         tgc.setFill(baseColor);
         tgc.fillPolygon(xs, ys, 4);
-        if (hasGrass && bColor != null) {
-            java.util.Random rng = new java.util.Random(seed);
+
+        java.util.Random rng = new java.util.Random(seed);
+
+        if (hasPebbles) {
+            int pebbleCount = 2 + rng.nextInt(5);
+            for (int i = 0; i < pebbleCount; i++) {
+                double px = 4 + rng.nextDouble() * (TILE_SIZE * 1.3);
+                double py = off + 2 + rng.nextDouble() * (TILE_SIZE / 2.0);
+                double size = 0.8 + rng.nextDouble() * 1.8;
+                tgc.setFill(Color.gray(0.15 + rng.nextDouble() * 0.2));
+                tgc.fillOval(px, py, size, size * 0.6);
+                tgc.setFill(Color.gray(0.5, 0.2));
+                tgc.fillOval(px + (size * 0.2), py, size * 0.3, size * 0.3);
+            }
+        }
+
+        if (hasSeedling) {
+            double cx = TILE_SIZE;
+            double cy = TILE_SIZE / 2.0 + off + 3;
+
+            double hue = 95 + rng.nextDouble() * 40;
+
+            double sat = 0.4 + rng.nextDouble() * 0.3;
+
+            double bright = 0.3 + rng.nextDouble() * 0.2;
+
+            tgc.setStroke(Color.hsb(hue, sat, bright));
+
+            tgc.setLineWidth(1.0 + rng.nextDouble() * 0.4);
+            tgc.setLineCap(StrokeLineCap.ROUND);
+
+            double len1 = 2.5 + rng.nextDouble() * 2.5;
+            double ang1 = Math.toRadians(-100 - rng.nextDouble() * 35);
+            double x1End = cx + Math.cos(ang1) * len1;
+            double y1End = cy + Math.sin(ang1) * len1;
+
+            tgc.beginPath();
+            tgc.moveTo(cx, cy);
+            tgc.quadraticCurveTo(cx - 2, cy - len1 / 3, x1End, y1End);
+            tgc.stroke();
+
+            double len2 = 2.5 + rng.nextDouble() * 2.5;
+            double ang2 = Math.toRadians(-80 + rng.nextDouble() * 35);
+            double x2End = cx + Math.cos(ang2) * len2;
+            double y2End = cy + Math.sin(ang2) * len2;
+
+            tgc.beginPath();
+            tgc.moveTo(cx, cy);
+            tgc.quadraticCurveTo(cx + 2, cy - len2 / 3, x2End, y2End);
+            tgc.stroke();
+        }
+
+        if (hasGrass && detailColor != null) {
             int count = 6 + rng.nextInt(6);
             for (int i = 0; i < count; i++) {
                 double rx = 4 + rng.nextDouble() * (TILE_SIZE * 1.5),
                         ry = off + 2 + rng.nextDouble() * (TILE_SIZE / 2.0);
                 double gh = 3 + rng.nextDouble() * 5, bend = -2 + rng.nextDouble() * 4;
-                tgc.setStroke(bColor.deriveColor(rng.nextDouble() * 10 - 5, 1, 0.8 + rng.nextDouble() * 0.4, 1));
+                tgc.setStroke(detailColor.deriveColor(rng.nextDouble() * 10 - 5, 1, 0.8 + rng.nextDouble() * 0.4, 1));
                 tgc.setLineWidth(1.0 + rng.nextDouble() * 0.5);
                 tgc.strokeLine(rx, ry, rx + bend, ry - gh);
             }
         }
+
         javafx.scene.SnapshotParameters p = new javafx.scene.SnapshotParameters();
         p.setFill(Color.TRANSPARENT);
         return temp.snapshot(p, null);
@@ -222,10 +328,21 @@ public class IndustrialFarmGame extends Application {
                     for (int j = -3; j <= 3; j++) {
                         int nx = tx + i, ny = ty + j;
                         if (ny >= 5 && ny < MAP_SIZE - 5 && nx >= 17 && nx < MAP_SIZE - 5) {
-                            if (farmMap[ny][nx] == 0) {
-                                farmMap[ny][nx] = 1;
-                                miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#5d3a1a"));
+
+                            if (currentToolType == TOOL_PLOW) {
+
+                                if (farmMap[ny][nx] == TERRAIN_GRASS) {
+                                    farmMap[ny][nx] = TERRAIN_DIRT;
+                                    miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#5d3a1a"));
+                                }
+                            } else if (currentToolType == TOOL_PLANTER) {
+
+                                if (farmMap[ny][nx] == TERRAIN_DIRT) {
+                                    farmMap[ny][nx] = TERRAIN_PLANTED;
+                                    miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#44aa44"));
+                                }
                             }
+
                         }
                     }
                 }
@@ -251,126 +368,128 @@ public class IndustrialFarmGame extends Application {
 
         for (int r = cRow - rad; r <= cRow + rad; r++) {
             for (int c = cCol - rad; c <= cCol + rad; c++) {
-
                 double ix = (c * TILE_SIZE - r * TILE_SIZE);
                 double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
-
-                // Frustum culling: desenha apenas o que está visível
                 if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
                         && iy < cameraY + HEIGHT + 150) {
-
                     Image img = null;
-                    boolean canHaveTree = false;
-                    double nVal = getNoise(r, c);
-
-                    // 1. PRIORIDADE: ESTRADA E CALÇADA (Colunas 0 a 11)
-                    // Usamos c >= 0 para garantir que ela não suma em coordenadas negativas
                     if (c >= 0 && c < 12) {
-                        if (c < 2 || c >= 10)
-                            img = imgRoadBorder;
-                        else
-                            img = imgRoad;
-                    }
-                    // 2. PRIORIDADE: MAPA REAL (Plantação e Grama Clara)
-                    // Apenas se estiver dentro dos limites de MAP_SIZE e FORA da estrada
-                    else if (r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE) {
+                        img = (c < 2 || c >= 10) ? imgRoadBorder : imgRoad;
+                    } else if (r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE) {
                         int margin = 5;
                         if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
                             img = darkGrassVariants[noiseMap[r][c]];
                         } else {
-                            img = (farmMap[r][c] == 1) ? imgPlowed : grassVariants[noiseMap[r][c]];
+
+                            if (farmMap[r][c] == TERRAIN_PLANTED) {
+
+                                img = seedlingVariants[noiseMap[r][c]];
+                            } else if (farmMap[r][c] == TERRAIN_DIRT) {
+
+                                if (noiseMap[r][c] > 35) {
+                                    img = plowedPebbleVariants[noiseMap[r][c]];
+                                } else {
+                                    img = imgPlowed;
+                                }
+                            } else {
+
+                                img = grassVariants[noiseMap[r][c]];
+                            }
                         }
+                    } else {
+                        img = darkGrassVariants[(int) (getNoise(r, c) * 63)];
                     }
-                    // 3. PRIORIDADE: FLORESTA INFINITA (Tudo o que sobra)
-                    else {
-                        int dynamicNoise = (int) (nVal * 63);
-                        img = darkGrassVariants[dynamicNoise];
-                        canHaveTree = true; // Só permitimos árvores fora da fazenda e da estrada
-                    }
-
-                    // DESENHO DO CHÃO
-                    if (img != null) {
+                    if (img != null)
                         gc.drawImage(img, Math.floor(ix - TILE_SIZE), Math.floor(iy - 10));
-                    }
-
-                    // DESENHO DA FLORESTA DENSA (Com Sombra)
-                    if (canHaveTree && nVal > 0.58 && treeSheet != null) {
-                        double tw = 416.0 / 4.0;
-                        double th = 541.0 / 2.0;
-                        double scale = 0.38;
-                        double dw = tw * scale;
-                        double dh = th * scale;
-
-                        double ox = (nVal * 8) - 4;
-                        double oy = (Math.sin(r * 0.5) * 3);
-
-                        // 1. DESENHO DA SOMBRA (Antes da árvore)
-                        gc.setFill(Color.rgb(0, 0, 0, 0.3)); // Preto com 30% de opacidade
-                        // Criamos uma elipse achatada na base da árvore
-                        // O deslocamento (+ dw*0.1) faz a sombra parecer vir de um lado
-                        gc.fillOval(ix - dw / 3.0 + ox + 5, iy - 5 + oy, dw * 0.8, dh * 0.2);
-
-                        // 2. DESENHO DA ÁRVORE
-                        int treeIdx = Math.abs((r * 13 + c * 7) % 8);
-                        gc.drawImage(treeSheet,
-                                (treeIdx % 4) * tw, (treeIdx / 4) * th, tw, th,
-                                ix - dw / 2.0 + ox, iy - dh + 5 + oy, dw, dh);
-                    }
                 }
             }
         }
 
-        // --- Linhas da Estrada, Trator e UI (Mantêm-se iguais) ---
         drawRoadLine(gc, 5.8, Color.web("#f1c40f"), 2);
         drawRoadLine(gc, 6.2, Color.web("#f1c40f"), 2);
         drawRoadLine(gc, 2.2, Color.WHITE, 1.5);
 
+        double tractorIsoY = (tractorX + tractorY) / 2.0;
+
+        drawTrees(gc, cCol, cRow, rad, true, tractorIsoY);
+
         if (isAttached) {
             double xt = (tractorX - tractorY), yt = (tractorX + tractorY) / 2.0 - 10;
-            double fx = trailerX + Math.cos(Math.toRadians(trailerAngle)) * 5,
-                    fy = trailerY + Math.sin(Math.toRadians(trailerAngle)) * 5;
+            double fx = trailerX + Math.cos(Math.toRadians(trailerAngle)) * 5;
+            double fy = trailerY + Math.sin(Math.toRadians(trailerAngle)) * 5;
             gc.setStroke(Color.BLACK);
             gc.setLineWidth(3);
             gc.strokeLine(xt, yt, (fx - fy), (fx + fy) / 2.0);
         }
 
-        renderPlantadoraIso(gc, trailerX, trailerY, trailerAngle);
-        renderIsoTractor(gc, (tractorX - tractorY), (tractorX + tractorY) / 2.0);
-        gc.restore();
+        Color machineColor;
+        if (currentToolType == TOOL_PLOW) {
+            machineColor = Color.web("#1a4a7a");
+        } else {
+            machineColor = Color.web("#2d7a1a");
+        }
+        renderMachineIso(gc, trailerX, trailerY, trailerAngle, machineColor);
 
+        renderIsoTractor(gc, (tractorX - tractorY), tractorIsoY);
+
+        drawTrees(gc, cCol, cRow, rad, false, tractorIsoY);
+
+        gc.restore();
         renderMiniMap(gc);
         renderSpeedometer(gc);
+    }
 
-        gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Arial", FontWeight.BOLD, 14));
-        gc.fillText("Trailer: " + (isAttached ? "CONECTADO" : "SOLTO (C para acoplar)"), 20, 30);
+    private void drawTrees(GraphicsContext gc, int cCol, int cRow, int rad, boolean behind, double tractorY) {
+        for (int r = cRow - rad; r <= cRow + rad; r++) {
+            for (int c = cCol - rad; c <= cCol + rad; c++) {
+                boolean isForestArea = !(c >= 0 && c < 12) && !(r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE);
+                if (isForestArea) {
+                    double nVal = getNoise(r, c);
+                    if (nVal > 0.58 && treeSheet != null) {
+                        double ix = (c * TILE_SIZE - r * TILE_SIZE);
+                        double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
+
+                        if (behind ? (iy <= tractorY) : (iy > tractorY)) {
+                            if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
+                                    && iy < cameraY + HEIGHT + 150) {
+                                double tw = TREE_W, th = TREE_H, scale = 0.38;
+                                double dw = tw * scale, dh = th * scale;
+                                double ox = (nVal * 8) - 4, oy = (Math.sin(r * 0.5) * 3);
+
+                                gc.setFill(Color.rgb(0, 0, 0, 0.3));
+                                gc.fillOval(ix - dw / 3.0 + ox + 5, iy - 5 + oy, dw * 0.8, dh * 0.2);
+
+                                int treeIdx = Math.abs((r * 13 + c * 7) % 8);
+                                gc.drawImage(treeSheet, (treeIdx % 4) * tw, (treeIdx / 4) * th, tw, th,
+                                        ix - dw / 2.0 + ox, iy - dh + 5 + oy, dw, dh);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private void drawRoadLine(GraphicsContext gc, double colPos, Color color, double width) {
         gc.setStroke(color);
         gc.setLineWidth(width);
 
-        // Fator de extensão: 10 vezes o tamanho do mapa para garantir que suma no
-        // horizonte
         double extension = MAP_SIZE * 10;
-
-        // Ponto inicial bem longe "atrás" e ponto final bem longe "adiante"
         double xs = (colPos * TILE_SIZE) + (extension * TILE_SIZE);
         double ys = ((colPos * TILE_SIZE) - (extension * TILE_SIZE)) / 2.0;
-
         double xe = (colPos * TILE_SIZE) - (extension * TILE_SIZE);
         double ye = ((colPos * TILE_SIZE) + (extension * TILE_SIZE)) / 2.0;
 
         gc.strokeLine(xs, ys + TILE_SIZE / 2.0, xe, ye + TILE_SIZE / 2.0);
     }
 
-    private void renderPlantadoraIso(GraphicsContext gc, double tx, double ty, double tA) {
+    private void renderMachineIso(GraphicsContext gc, double tx, double ty, double tA, Color bodyColor) {
         double ix = tx - ty, iy = (tx + ty) / 2.0;
         gc.save();
         gc.translate(ix, iy);
         gc.rotate(tA + 45);
 
-        gc.setFill(Color.web("#1a4a7a"));
+        gc.setFill(bodyColor);
         gc.fillRect(-7, -45, 12, 90);
         gc.setFill(Color.web("#000000", 0.2));
         gc.fillRect(-7, -45, 4, 90);
@@ -381,7 +500,8 @@ public class IndustrialFarmGame extends Application {
             gc.fillOval(-14, i - 4, 8, 8);
             gc.setFill(Color.web("#eeeeee", 0.5));
             gc.fillOval(-12, i - 2, 3, 3);
-            gc.setFill(Color.web("#143a5f"));
+
+            gc.setFill(bodyColor.darker());
             gc.fillRect(-8, i - 4, 5, 8);
         }
         gc.setFill(Color.web("#222222"));
@@ -393,36 +513,60 @@ public class IndustrialFarmGame extends Application {
     private void renderIsoTractor(GraphicsContext gc, double x, double y) {
         if (tractorSheet == null)
             return;
+
         double fa = (90 - ((smoothedAngle % 360 + 360) % 360) + 360) % 360;
         int idx = (int) Math.floor((fa + 7.5) / 15.0) % 24;
-        double dw = SPRITE_W * TRACTOR_SCALE, dh = SPRITE_H * TRACTOR_SCALE;
+        double dw = SPRITE_W * TRACTOR_SCALE;
+        double dh = SPRITE_H * TRACTOR_SCALE;
+
+        gc.save();
+
+        gc.translate(x + 2, y + (dh * 0.02));
+        gc.transform(1, 0, -0.8, 0.5, 0, 0);
+        gc.setGlobalAlpha(0.3);
+        javafx.scene.effect.ColorAdjust monochrome = new javafx.scene.effect.ColorAdjust();
+        monochrome.setBrightness(-1.0);
+        gc.setEffect(monochrome);
+        gc.drawImage(tractorSheet,
+                (idx % 6) * SPRITE_W, (idx / 6) * SPRITE_H, SPRITE_W, SPRITE_H,
+                -dw / 2.0, -dh * 0.85, dw, dh);
+        gc.setEffect(null);
+        gc.setGlobalAlpha(1.0);
+        gc.restore();
+
         gc.save();
         gc.translate(x, y);
-        gc.drawImage(tractorSheet, (idx % 6) * SPRITE_W, (idx / 6) * SPRITE_H, SPRITE_W, SPRITE_H, -dw / 2.0,
-                -dh * 0.85, dw, dh);
+        gc.drawImage(tractorSheet,
+                (idx % 6) * SPRITE_W, (idx / 6) * SPRITE_H, SPRITE_W, SPRITE_H,
+                -dw / 2.0, -dh * 0.85, dw, dh);
         gc.restore();
     }
 
     private void renderMiniMap(GraphicsContext gc) {
-        double sz = 140, mx = WIDTH - sz - 20, my = 20;
+        double sz = 140, mx = WIDTH - sz - 20, my = 20, cx = mx + sz / 2, cy = my + sz / 2;
         gc.setFill(Color.web("#111111", 0.85));
         gc.fillOval(mx, my, sz, sz);
         gc.save();
         gc.beginPath();
-        gc.arc(mx + sz / 2, my + sz / 2, sz / 2, sz / 2, 0, 360);
+        gc.arc(cx, cy, sz / 2, sz / 2, 0, 360);
         gc.clip();
-        double vr = 25;
-        gc.drawImage(miniMapImage, (tractorX / TILE_SIZE) - vr, (tractorY / TILE_SIZE) - vr, vr * 2, vr * 2, mx, my, sz,
-                sz);
+        // Minimapa agora usa a variável miniMapVR para zoom
+        gc.drawImage(miniMapImage, (tractorX / TILE_SIZE) - miniMapVR, (tractorY / TILE_SIZE) - miniMapVR,
+                miniMapVR * 2, miniMapVR * 2, mx, my, sz, sz);
         gc.setFill(Color.YELLOW);
-        gc.fillOval(mx + sz / 2 - 3, my + sz / 2 - 3, 6, 6);
+        gc.fillOval(cx - 3, cy - 3, 6, 6);
         gc.restore();
         gc.setStroke(Color.WHITE);
+        gc.setLineWidth(2);
         gc.strokeOval(mx, my, sz, sz);
+
+        // Desenhar botões de zoom
+        drawZoomButton(gc, cx + 45, cy + 45, "+");
+        drawZoomButton(gc, cx + 15, cy + 60, "-");
     }
 
     private void renderSpeedometer(GraphicsContext gc) {
-        double cx = 120, cy = HEIGHT - 100, r = 90;
+        double cx = 120, cy = HEIGHT - 50, r = 90;
         gc.setFill(Color.web("#111111", 0.9));
         gc.fillArc(cx - r, cy - r, r * 2, r * 2, 0, 180, ArcType.ROUND);
         gc.setStroke(Color.WHITE);
@@ -437,10 +581,6 @@ public class IndustrialFarmGame extends Application {
             gc.fillText(String.valueOf((int) ((i / 180.0) * MAX_SPEED_KMH)), cx + Math.cos(rad) * (r - 18) - 5,
                     cy - Math.sin(rad) * (r - 18) + 5);
         }
-        double sk = (Math.abs(currentSpeed) / MAX_SPEED) * MAX_SPEED_KMH;
-        gc.setFill(Color.CYAN);
-        gc.setFont(Font.font("Arial", FontWeight.BOLD, 16));
-        gc.fillText((int) sk + " Km/h", cx - 30, cy + 25);
         gc.save();
         gc.translate(cx, cy);
         gc.rotate(-180 + (180 * (Math.abs(currentSpeed) / MAX_SPEED)));

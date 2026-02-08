@@ -17,6 +17,7 @@ import javafx.scene.text.FontWeight;
 import javafx.scene.text.TextAlignment;
 import javafx.stage.Stage;
 import java.util.HashSet;
+import java.util.Random;
 import java.util.Set;
 
 public class IndustrialFarmGame extends Application {
@@ -29,18 +30,31 @@ public class IndustrialFarmGame extends Application {
     private static final int TERRAIN_GRASS = 0;
     private static final int TERRAIN_DIRT = 1;
     private static final int TERRAIN_PLANTED = 2;
+    private static final int TERRAIN_GRAVEL_ROAD = 3;
+    private static final int TERRAIN_LIGHT_DIRT = 4;
 
     private static final int TOOL_PLOW = 0;
     private static final int TOOL_PLANTER = 1;
     private int currentToolType = TOOL_PLOW;
+
+    private final int SHED_X = 60;
+    private final int SHED_Y = 60;
+
+    private final int SHED_W = 6;
+    private final int SHED_H = 8;
+
+    private boolean[][] treeMap = new boolean[MAP_SIZE][MAP_SIZE];
 
     private Image imgPlowed, imgRoad, imgRoadBorder;
     private Image[] grassVariants = new Image[64];
     private Image[] darkGrassVariants = new Image[64];
     private Image[] plowedPebbleVariants = new Image[64];
     private Image[] seedlingVariants = new Image[64];
+    private Image[] gravelVariants = new Image[16];
 
     private Image treeSheet;
+    private Image shedImage;
+
     private final double TREE_W = 416.0 / 4.0;
     private final double TREE_H = 541.0 / 2.0;
 
@@ -57,8 +71,8 @@ public class IndustrialFarmGame extends Application {
     private double currentSpeed = 0;
 
     private final double MAX_SPEED_KMH = 30.0;
-    private final double MAX_SPEED = 1.8;
-    private final double ACCELERATION = 0.005;
+    private final double MAX_SPEED = 2.6;
+    private final double ACCELERATION = 0.008;
     private final double FRICTION = 0.015;
     private final double BRAKE_FORCE = 0.04;
     private final double BASE_ROTATION = 1.2;
@@ -74,6 +88,8 @@ public class IndustrialFarmGame extends Application {
 
     private double miniMapVR = 25.0;
 
+    private long lastFrameTime = 0;
+
     @Override
     public void start(Stage stage) {
         createTileCache();
@@ -85,11 +101,70 @@ public class IndustrialFarmGame extends Application {
             }
         }
 
+        for (int r = 0; r < MAP_SIZE; r++) {
+            for (int c = 0; c < MAP_SIZE; c++) {
+
+                if (c < 12) {
+                    treeMap[r][c] = false;
+                    continue;
+                }
+
+                if (r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE) {
+                    double nVal = noiseMap[r][c] / 63.0;
+
+                    treeMap[r][c] = (nVal > 0.60);
+                } else {
+                    treeMap[r][c] = false;
+                }
+            }
+        }
+
+        int startCol = 12;
+        int endCol = SHED_X + SHED_W / 2;
+        int pathCenterRow = SHED_Y + SHED_H + 3;
+
+        for (int c = startCol; c <= endCol + 4; c++) {
+            int rowOffset = (int) (Math.sin((c - startCol) * 0.15) * 5);
+            int rBase = pathCenterRow + rowOffset;
+
+            for (int w = -6; w <= 6; w++) {
+                int r = rBase + w;
+                if (r >= 0 && r < MAP_SIZE && c >= 0 && c < MAP_SIZE) {
+                    farmMap[r][c] = TERRAIN_GRAVEL_ROAD;
+                    miniMapImage.getPixelWriter().setColor(c, r, Color.web("#6A5D4D"));
+                }
+            }
+        }
+
+        int patioCenterX = SHED_X + SHED_W / 2;
+        int patioCenterY = SHED_Y + SHED_H / 2;
+        int baseRadius = 18;
+
+        for (int j = patioCenterY - baseRadius - 5; j < patioCenterY + baseRadius + 10; j++) {
+            for (int i = patioCenterX - baseRadius - 10; i < patioCenterX + baseRadius + 10; i++) {
+                if (i >= 0 && i < MAP_SIZE && j >= 0 && j < MAP_SIZE) {
+
+                    double dx = i - patioCenterX;
+                    double dy = j - patioCenterY;
+                    double dist = Math.sqrt(dx * dx + dy * dy);
+
+                    double angle = Math.atan2(dy, dx);
+                    double deformation = Math.sin(angle * 5) * 2.5 + Math.cos(angle * 3) * 2.0;
+
+                    if (dist < baseRadius + deformation) {
+                        farmMap[j][i] = TERRAIN_GRAVEL_ROAD;
+                        miniMapImage.getPixelWriter().setColor(i, j, Color.web("#6A5D4D"));
+                    }
+                }
+            }
+        }
+
         try {
             tractorSheet = new Image(getClass().getResourceAsStream("/trator.png"));
             treeSheet = new Image(getClass().getResourceAsStream("/trees.png"));
+            shedImage = new Image(getClass().getResourceAsStream("/shed.png"));
         } catch (Exception e) {
-            System.err.println("Erro: Imagens não encontradas (trator.png ou trees.png).");
+            System.err.println("Erro: Imagens não encontradas. Verifique trator.png, trees.png e shed.png.");
         }
 
         Canvas canvas = new Canvas(WIDTH, HEIGHT);
@@ -110,14 +185,9 @@ public class IndustrialFarmGame extends Application {
         scene.setOnMouseClicked(e -> {
             if (e.getButton() == MouseButton.PRIMARY) {
                 double mx = e.getX(), my = e.getY();
-                // cx e cy são o centro do minimapa
                 double sz = 140, cx = (WIDTH - sz - 20) + sz / 2, cy = 20 + sz / 2;
-
-                // Detecta clique no botão + (miniMapVR diminui para dar mais zoom)
                 if (Math.hypot(mx - (cx + 45), my - (cy + 45)) < 12)
                     miniMapVR = Math.max(8, miniMapVR - 4);
-
-                // Detecta clique no botão - (miniMapVR aumenta para ver mais longe)
                 if (Math.hypot(mx - (cx + 15), my - (cy + 60)) < 12)
                     miniMapVR = Math.min(90, miniMapVR + 4);
             }
@@ -126,10 +196,33 @@ public class IndustrialFarmGame extends Application {
         new AnimationTimer() {
             @Override
             public void handle(long now) {
-                update();
+                if (lastFrameTime == 0)
+                    lastFrameTime = now;
+                double delta = (now - lastFrameTime) / 1_000_000_000.0;
+                lastFrameTime = now;
+
+                update(delta);
                 render(gc);
             }
         }.start();
+
+        int transitionRadius = 2;
+
+        for (int r = 0; r < MAP_SIZE; r++) {
+            for (int c = 0; c < MAP_SIZE; c++) {
+
+                // Só altera terrenos naturais
+                if (farmMap[r][c] == TERRAIN_GRASS || farmMap[r][c] == TERRAIN_DIRT) {
+
+                    int d = distanceToTerrain(r, c, TERRAIN_GRAVEL_ROAD, transitionRadius);
+
+                    // Primeira e segunda camada SEMPRE light dirt
+                    if (d == 1) {
+                        farmMap[r][c] = TERRAIN_LIGHT_DIRT;
+                    }
+                }
+            }
+        }
 
         stage.setTitle("Farm Simulator - Arado e Plantadeira");
         stage.setScene(scene);
@@ -156,7 +249,7 @@ public class IndustrialFarmGame extends Application {
     private void createTileCache() {
         imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, false, false, null);
         imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, false, false, null);
-        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, false, false, null);
+        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, true, false, null);
 
         Color grassColor = Color.web("#2d4c21");
         Color bladeColor = Color.web("#3a5f27");
@@ -170,6 +263,58 @@ public class IndustrialFarmGame extends Application {
             plowedPebbleVariants[i] = createSingleTileImage(plowedColor, i, false, true, false, null);
             seedlingVariants[i] = createSingleTileImage(plowedColor, i, false, false, true, null);
         }
+        for (int i = 0; i < 16; i++) {
+            gravelVariants[i] = createHeavyGravelTile(Color.web("#453d33"), i);
+        }
+    }
+
+    private Image createHeavyGravelTile(Color baseColor, int seed) {
+        int w = TILE_SIZE * 2;
+        int h = TILE_SIZE + 15;
+        Canvas temp = new Canvas(w, h);
+        GraphicsContext tgc = temp.getGraphicsContext2D();
+        double off = 10;
+        double[] xs = { TILE_SIZE, TILE_SIZE * 2, TILE_SIZE, 0 };
+        double[] ys = { off, TILE_SIZE / 2.0 + off, TILE_SIZE + off, TILE_SIZE / 2.0 + off };
+
+        tgc.setFill(baseColor.darker());
+        tgc.fillPolygon(xs, ys, 4);
+
+        Random rng = new Random(seed * 999);
+
+        for (int i = 0; i < 250; i++) {
+            double px = rng.nextDouble() * (TILE_SIZE * 2);
+            double py = off + rng.nextDouble() * TILE_SIZE;
+            tgc.setFill(baseColor.deriveColor(rng.nextDouble() * 20 - 10, 1, 0.8, 0.3));
+            tgc.fillOval(px, py, 1.5, 1.5);
+        }
+
+        int pebbleCount = 40 + rng.nextInt(20);
+        for (int i = 0; i < pebbleCount; i++) {
+            double px = rng.nextDouble() * (TILE_SIZE * 1.8);
+            double py = off + rng.nextDouble() * (TILE_SIZE * 0.9);
+            double size = 2.0 + rng.nextDouble() * 3.5;
+
+            tgc.setFill(Color.rgb(0, 0, 0, 0.4));
+            tgc.fillOval(px + 1, py + 1, size, size * 0.6);
+
+            double tone = rng.nextDouble();
+            if (tone > 0.6)
+                tgc.setFill(Color.web("#878787fd"));
+            else if (tone > 0.2)
+                tgc.setFill(Color.web("#5c5b5b"));
+            else
+                tgc.setFill(Color.web("#756c5c"));
+
+            tgc.fillOval(px, py, size, size * 0.6);
+
+            tgc.setFill(Color.web("#FFFFFF", 0.15));
+            tgc.fillOval(px + size / 4, py + size / 10, size / 2, size / 4);
+        }
+
+        javafx.scene.SnapshotParameters p = new javafx.scene.SnapshotParameters();
+        p.setFill(Color.TRANSPARENT);
+        return temp.snapshot(p, null);
     }
 
     private Image createSingleTileImage(Color baseColor, int seed, boolean hasGrass, boolean hasPebbles,
@@ -203,15 +348,10 @@ public class IndustrialFarmGame extends Application {
         if (hasSeedling) {
             double cx = TILE_SIZE;
             double cy = TILE_SIZE / 2.0 + off + 3;
-
             double hue = 95 + rng.nextDouble() * 40;
-
             double sat = 0.4 + rng.nextDouble() * 0.3;
-
             double bright = 0.3 + rng.nextDouble() * 0.2;
-
             tgc.setStroke(Color.hsb(hue, sat, bright));
-
             tgc.setLineWidth(1.0 + rng.nextDouble() * 0.4);
             tgc.setLineCap(StrokeLineCap.ROUND);
 
@@ -264,16 +404,16 @@ public class IndustrialFarmGame extends Application {
         }
     }
 
-    private void update() {
+    private void update(double dt) {
         if (activeKeys.contains(KeyCode.W))
-            currentSpeed = Math.min(currentSpeed + ACCELERATION, MAX_SPEED);
+            currentSpeed = Math.min(currentSpeed + ACCELERATION * dt * 60, MAX_SPEED);
         else if (activeKeys.contains(KeyCode.S)) {
             if (currentSpeed > 0)
-                currentSpeed = Math.max(currentSpeed - BRAKE_FORCE, 0);
+                currentSpeed = Math.max(currentSpeed - BRAKE_FORCE * dt * 60, 0);
             else
                 currentSpeed = Math.max(currentSpeed - ACCELERATION, -MAX_SPEED / 3.0);
         } else {
-            currentSpeed *= (1 - FRICTION);
+            currentSpeed *= (1 - FRICTION * dt * 60);
             if (Math.abs(currentSpeed) < 0.005)
                 currentSpeed = 0;
         }
@@ -282,9 +422,9 @@ public class IndustrialFarmGame extends Application {
             double dir = currentSpeed > 0 ? 1 : -1;
             double turn = Math.min(Math.abs(currentSpeed) * 1.2, BASE_ROTATION);
             if (activeKeys.contains(KeyCode.A))
-                angle -= turn * dir;
+                angle -= turn * dir * dt * 60;
             if (activeKeys.contains(KeyCode.D))
-                angle += turn * dir;
+                angle += turn * dir * dt * 60;
         }
 
         double diff = angle - smoothedAngle;
@@ -294,14 +434,26 @@ public class IndustrialFarmGame extends Application {
             diff -= 360;
         smoothedAngle += diff * 0.25;
 
-        double nextX = tractorX + Math.cos(Math.toRadians(angle)) * currentSpeed;
-        double nextY = tractorY + Math.sin(Math.toRadians(angle)) * currentSpeed;
+        double nextX = tractorX + Math.cos(Math.toRadians(angle)) * currentSpeed * dt * 60;
+        double nextY = tractorY + Math.sin(Math.toRadians(angle)) * currentSpeed * dt * 60;
+
         double limit = (MAP_SIZE - 1) * TILE_SIZE;
 
-        if (nextX >= 0 && nextX <= limit && nextY >= 0 && nextY <= limit) {
+        double shedMinX = SHED_X * TILE_SIZE;
+        double shedMaxX = (SHED_X + SHED_W) * TILE_SIZE;
+        double shedMinY = SHED_Y * TILE_SIZE;
+        double shedMaxY = (SHED_Y + SHED_H) * TILE_SIZE;
+        boolean collision = false;
+
+        if (nextX > shedMinX && nextX < shedMaxX && nextY > shedMinY && nextY < shedMaxY) {
+            collision = true;
+            currentSpeed = -currentSpeed * 0.5;
+        }
+
+        if (!collision && nextX >= 0 && nextX <= limit && nextY >= 0 && nextY <= limit) {
             tractorX = nextX;
             tractorY = nextY;
-        } else {
+        } else if (!collision) {
             currentSpeed *= 0.5;
         }
 
@@ -328,21 +480,19 @@ public class IndustrialFarmGame extends Application {
                     for (int j = -3; j <= 3; j++) {
                         int nx = tx + i, ny = ty + j;
                         if (ny >= 5 && ny < MAP_SIZE - 5 && nx >= 17 && nx < MAP_SIZE - 5) {
-
+                            if (farmMap[ny][nx] == TERRAIN_GRAVEL_ROAD)
+                                continue;
                             if (currentToolType == TOOL_PLOW) {
-
                                 if (farmMap[ny][nx] == TERRAIN_GRASS) {
                                     farmMap[ny][nx] = TERRAIN_DIRT;
                                     miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#5d3a1a"));
                                 }
                             } else if (currentToolType == TOOL_PLANTER) {
-
                                 if (farmMap[ny][nx] == TERRAIN_DIRT) {
                                     farmMap[ny][nx] = TERRAIN_PLANTED;
                                     miniMapImage.getPixelWriter().setColor(nx, ny, Color.web("#44aa44"));
                                 }
                             }
-
                         }
                     }
                 }
@@ -368,6 +518,8 @@ public class IndustrialFarmGame extends Application {
 
         for (int r = cRow - rad; r <= cRow + rad; r++) {
             for (int c = cCol - rad; c <= cCol + rad; c++) {
+                boolean underShed = c >= SHED_X && c < SHED_X + SHED_W &&
+                        r >= SHED_Y && r < SHED_Y + SHED_H;
                 double ix = (c * TILE_SIZE - r * TILE_SIZE);
                 double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
                 if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
@@ -376,31 +528,64 @@ public class IndustrialFarmGame extends Application {
                     if (c >= 0 && c < 12) {
                         img = (c < 2 || c >= 10) ? imgRoadBorder : imgRoad;
                     } else if (r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE) {
-                        int margin = 5;
-                        if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
-                            img = darkGrassVariants[noiseMap[r][c]];
+                        if (farmMap[r][c] == TERRAIN_GRAVEL_ROAD) {
+                            img = gravelVariants[noiseMap[r][c] % 16];
                         } else {
-
-                            if (farmMap[r][c] == TERRAIN_PLANTED) {
-
-                                img = seedlingVariants[noiseMap[r][c]];
-                            } else if (farmMap[r][c] == TERRAIN_DIRT) {
-
-                                if (noiseMap[r][c] > 35) {
-                                    img = plowedPebbleVariants[noiseMap[r][c]];
-                                } else {
-                                    img = imgPlowed;
-                                }
+                            int margin = 5;
+                            if (c < 12 + margin || c >= MAP_SIZE - margin || r < margin || r >= MAP_SIZE - margin) {
+                                img = darkGrassVariants[noiseMap[r][c]];
                             } else {
+                                if (farmMap[r][c] == TERRAIN_PLANTED) {
+                                    img = seedlingVariants[noiseMap[r][c]];
+                                } else if (farmMap[r][c] == TERRAIN_DIRT) {
+                                    if (noiseMap[r][c] > 35) {
+                                        img = plowedPebbleVariants[noiseMap[r][c]];
+                                    } else {
+                                        img = imgPlowed;
+                                    }
+                                } else if (farmMap[r][c] == TERRAIN_LIGHT_DIRT) {
 
-                                img = grassVariants[noiseMap[r][c]];
+                                    int n = noiseMap[r][c];
+
+                                    img = imgPlowed;
+
+                                    if (n > 30) {
+                                        img = plowedPebbleVariants[n];
+                                    }
+                                } else {
+                                    img = grassVariants[noiseMap[r][c]];
+                                }
                             }
                         }
                     } else {
                         img = darkGrassVariants[(int) (getNoise(r, c) * 63)];
                     }
-                    if (img != null)
+                    if (img != null) {
                         gc.drawImage(img, Math.floor(ix - TILE_SIZE), Math.floor(iy - 10));
+
+                        if (r >= 0 && r < MAP_SIZE && c >= 0 && c < MAP_SIZE) {
+
+                            boolean nearGravel = hasNeighbor(r, c, TERRAIN_GRAVEL_ROAD);
+                            boolean nearGrass = hasNeighbor(r, c, TERRAIN_GRASS);
+
+                            if (farmMap[r][c] == TERRAIN_LIGHT_DIRT && nearGravel) {
+                                gc.setFill(Color.rgb(120, 110, 95, 0.28));
+                                drawIsoOverlay(gc, ix, iy);
+
+                                double seed = noiseMap[r][c] / 63.0;
+                                if (seed > 0.6) {
+                                    gc.setFill(Color.rgb(90, 90, 90, 0.35));
+                                    gc.fillOval(ix - 3, iy + 2, 2.2, 1.4);
+                                }
+                            }
+
+                            if (farmMap[r][c] == TERRAIN_LIGHT_DIRT && nearGrass) {
+                                gc.setFill(Color.rgb(105, 130, 95, 0.22));
+                                drawIsoOverlay(gc, ix, iy);
+                            }
+                        }
+                    }
+
                 }
             }
         }
@@ -412,6 +597,12 @@ public class IndustrialFarmGame extends Application {
         double tractorIsoY = (tractorX + tractorY) / 2.0;
 
         drawTrees(gc, cCol, cRow, rad, true, tractorIsoY);
+
+        double shedBaseIsoY = (SHED_X * TILE_SIZE + (SHED_Y + SHED_H) * TILE_SIZE) / 2.0;
+
+        if (tractorIsoY >= shedBaseIsoY) {
+            drawShedImage(gc);
+        }
 
         if (isAttached) {
             double xt = (tractorX - tractorY), yt = (tractorX + tractorY) / 2.0 - 10;
@@ -432,6 +623,10 @@ public class IndustrialFarmGame extends Application {
 
         renderIsoTractor(gc, (tractorX - tractorY), tractorIsoY);
 
+        if (tractorIsoY < shedBaseIsoY) {
+            drawShedImage(gc);
+        }
+
         drawTrees(gc, cCol, cRow, rad, false, tractorIsoY);
 
         gc.restore();
@@ -439,31 +634,142 @@ public class IndustrialFarmGame extends Application {
         renderSpeedometer(gc);
     }
 
+    private int distanceToTerrain(int r, int c, int terrainType, int maxDist) {
+        for (int d = 1; d <= maxDist; d++) {
+            for (int dy = -d; dy <= d; dy++) {
+                for (int dx = -d; dx <= d; dx++) {
+                    int nr = r + dy;
+                    int nc = c + dx;
+                    if (nr >= 0 && nr < MAP_SIZE && nc >= 0 && nc < MAP_SIZE) {
+                        if (farmMap[nr][nc] == terrainType) {
+                            return d;
+                        }
+                    }
+                }
+            }
+        }
+        return 999;
+    }
+
+    private void drawIsoOverlay(GraphicsContext gc, double ix, double iy) {
+        gc.fillPolygon(
+                new double[] { ix, ix + TILE_SIZE, ix, ix - TILE_SIZE },
+                new double[] { iy, iy + TILE_SIZE / 2.0, iy + TILE_SIZE, iy + TILE_SIZE / 2.0 },
+                4);
+    }
+
+    private boolean hasNeighbor(int r, int c, int type) {
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -1; dx <= 1; dx++) {
+                if (dx == 0 && dy == 0)
+                    continue;
+
+                int nr = r + dy;
+                int nc = c + dx;
+
+                if (nr >= 0 && nr < MAP_SIZE && nc >= 0 && nc < MAP_SIZE) {
+                    if (farmMap[nr][nc] == type)
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void drawShedImage(GraphicsContext gc) {
+        if (shedImage == null)
+            return;
+
+        double sx = (SHED_X * TILE_SIZE - SHED_Y * TILE_SIZE);
+        double ex = ((SHED_X + SHED_W) * TILE_SIZE - (SHED_Y + SHED_H) * TILE_SIZE);
+        double ey = ((SHED_X + SHED_W) * TILE_SIZE + (SHED_Y + SHED_H) * TILE_SIZE) / 2.0;
+
+        double baseX = (sx + ex) / 2.0;
+        double baseY = ey;
+
+        double originalW = shedImage.getWidth();
+        double originalH = shedImage.getHeight();
+
+        double targetW = (SHED_W * TILE_SIZE + SHED_H * TILE_SIZE) * 0.75;
+        double scaleFactor = targetW / originalW;
+        double targetH = originalH * scaleFactor;
+
+        double drawX = baseX - targetW / 2.0;
+        double drawY = baseY - targetH + (10 * scaleFactor);
+
+        gc.save();
+        gc.translate(drawX + targetW * 0.52, drawY + targetH * 0.90);
+        gc.transform(1, 0, -0.8, 0.5, 0, 0);
+        gc.setGlobalAlpha(0.28);
+
+        javafx.scene.effect.ColorAdjust mono = new javafx.scene.effect.ColorAdjust();
+        mono.setBrightness(-1.0);
+        gc.setEffect(mono);
+
+        gc.drawImage(
+                shedImage,
+                -targetW / 2.0,
+                -targetH,
+                targetW,
+                targetH);
+
+        gc.setEffect(null);
+        gc.setGlobalAlpha(1.0);
+        gc.restore();
+
+        gc.drawImage(
+                shedImage,
+                drawX,
+                drawY,
+                targetW,
+                targetH);
+    }
+
     private void drawTrees(GraphicsContext gc, int cCol, int cRow, int rad, boolean behind, double tractorY) {
+        if (treeSheet == null)
+            return;
+
         for (int r = cRow - rad; r <= cRow + rad; r++) {
             for (int c = cCol - rad; c <= cCol + rad; c++) {
-                boolean isForestArea = !(c >= 0 && c < 12) && !(r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE);
-                if (isForestArea) {
-                    double nVal = getNoise(r, c);
-                    if (nVal > 0.58 && treeSheet != null) {
-                        double ix = (c * TILE_SIZE - r * TILE_SIZE);
-                        double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
 
-                        if (behind ? (iy <= tractorY) : (iy > tractorY)) {
-                            if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
-                                    && iy < cameraY + HEIGHT + 150) {
-                                double tw = TREE_W, th = TREE_H, scale = 0.38;
-                                double dw = tw * scale, dh = th * scale;
-                                double ox = (nVal * 8) - 4, oy = (Math.sin(r * 0.5) * 3);
+                boolean isForestArea = !(c >= 0 && c < 12) &&
+                        !(r >= 0 && r < MAP_SIZE && c >= 12 && c < MAP_SIZE);
 
-                                gc.setFill(Color.rgb(0, 0, 0, 0.3));
-                                gc.fillOval(ix - dw / 3.0 + ox + 5, iy - 5 + oy, dw * 0.8, dh * 0.2);
+                if (!isForestArea)
+                    continue;
 
-                                int treeIdx = Math.abs((r * 13 + c * 7) % 8);
-                                gc.drawImage(treeSheet, (treeIdx % 4) * tw, (treeIdx / 4) * th, tw, th,
-                                        ix - dw / 2.0 + ox, iy - dh + 5 + oy, dw, dh);
-                            }
-                        }
+                double nVal = getNoise(r, c);
+
+                if (nVal <= 0.58)
+                    continue;
+
+                double ix = (c * TILE_SIZE - r * TILE_SIZE);
+                double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
+
+                if (behind ? (iy <= tractorY) : (iy > tractorY)) {
+
+                    if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 &&
+                            iy > cameraY - 150 && iy < cameraY + HEIGHT + 150) {
+
+                        double tw = TREE_W, th = TREE_H, scale = 0.38;
+                        double dw = tw * scale, dh = th * scale;
+
+                        double ox = (nVal * 8) - 4;
+                        double oy = (Math.sin(r * 0.5) * 3);
+
+                        gc.setFill(Color.rgb(0, 0, 0, 0.3));
+                        gc.fillOval(ix - dw / 3.0 + ox + 5, iy - 5 + oy, dw * 0.8, dh * 0.2);
+
+                        int treeIdx = Math.abs((r * 13 + c * 7) % 8);
+
+                        gc.drawImage(
+                                treeSheet,
+                                (treeIdx % 4) * tw,
+                                (treeIdx / 4) * th,
+                                tw, th,
+                                ix - dw / 2.0 + ox,
+                                iy - dh + 5 + oy,
+                                dw, dh);
                     }
                 }
             }
@@ -550,7 +856,6 @@ public class IndustrialFarmGame extends Application {
         gc.beginPath();
         gc.arc(cx, cy, sz / 2, sz / 2, 0, 360);
         gc.clip();
-        // Minimapa agora usa a variável miniMapVR para zoom
         gc.drawImage(miniMapImage, (tractorX / TILE_SIZE) - miniMapVR, (tractorY / TILE_SIZE) - miniMapVR,
                 miniMapVR * 2, miniMapVR * 2, mx, my, sz, sz);
         gc.setFill(Color.YELLOW);
@@ -560,7 +865,6 @@ public class IndustrialFarmGame extends Application {
         gc.setLineWidth(2);
         gc.strokeOval(mx, my, sz, sz);
 
-        // Desenhar botões de zoom
         drawZoomButton(gc, 14, cx + 50, cy + 50, "+");
         drawZoomButton(gc, 20, cx + 20, cy + 65, "-");
     }

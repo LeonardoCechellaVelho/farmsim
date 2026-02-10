@@ -32,6 +32,7 @@ public class IndustrialFarmGame extends Application {
     private static final int TERRAIN_PLANTED = 2;
     private static final int TERRAIN_GRAVEL_ROAD = 3;
     private static final int TERRAIN_LIGHT_DIRT = 4;
+    private static final int TERRAIN_WHEAT = 5;
 
     private static final int TOOL_PLOW = 0;
     private static final int TOOL_PLANTER = 1;
@@ -50,6 +51,7 @@ public class IndustrialFarmGame extends Application {
     private Image[] darkGrassVariants = new Image[64];
     private Image[] plowedPebbleVariants = new Image[64];
     private Image[] seedlingVariants = new Image[64];
+    private Image[] wheatVariants = new Image[64];
     private Image[] gravelVariants = new Image[16];
 
     private Image treeSheet;
@@ -89,6 +91,20 @@ public class IndustrialFarmGame extends Application {
     private double miniMapVR = 25.0;
 
     private long lastFrameTime = 0;
+
+    private boolean isNearShed = false;
+
+    private final double BTN_W = 220;
+    private final double BTN_H = 50;
+
+    private double gameTimeSeconds = 6 * 3600;
+    private int gameDay = 1;
+    private int gameMonth = 1;
+    private int gameYear = 1;
+
+    private final double TIME_SCALE = 300.0;
+
+    private double nightAlpha = 0.0;
 
     @Override
     public void start(Stage stage) {
@@ -176,15 +192,33 @@ public class IndustrialFarmGame extends Application {
             activeKeys.add(e.getCode());
             if (e.getCode() == KeyCode.C)
                 toggleCouping();
-            if (e.getCode() == KeyCode.Q)
-                toggleTool();
         });
 
         scene.setOnKeyReleased(e -> activeKeys.remove(e.getCode()));
 
         scene.setOnMouseClicked(e -> {
+            double mx = e.getX();
+            double my = e.getY();
+
+            if (isNearShed) {
+                double btnX = WIDTH - BTN_W - 20;
+
+                double btnY_Sleep = HEIGHT - BTN_H - 20;
+                double btnY_Tool = btnY_Sleep - BTN_H - 10;
+
+                if (mx >= btnX && mx <= btnX + BTN_W && my >= btnY_Tool && my <= btnY_Tool + BTN_H) {
+                    toggleTool();
+                }
+
+                if (mx >= btnX && mx <= btnX + BTN_W && my >= btnY_Sleep && my <= btnY_Sleep + BTN_H) {
+
+                    gameTimeSeconds = 6 * 3600;
+                    gameDay++;
+                    passDay();
+                }
+            }
+
             if (e.getButton() == MouseButton.PRIMARY) {
-                double mx = e.getX(), my = e.getY();
                 double sz = 140, cx = (WIDTH - sz - 20) + sz / 2, cy = 20 + sz / 2;
                 if (Math.hypot(mx - (cx + 45), my - (cy + 45)) < 12)
                     miniMapVR = Math.max(8, miniMapVR - 4);
@@ -211,12 +245,10 @@ public class IndustrialFarmGame extends Application {
         for (int r = 0; r < MAP_SIZE; r++) {
             for (int c = 0; c < MAP_SIZE; c++) {
 
-                // Só altera terrenos naturais
                 if (farmMap[r][c] == TERRAIN_GRASS || farmMap[r][c] == TERRAIN_DIRT) {
 
                     int d = distanceToTerrain(r, c, TERRAIN_GRAVEL_ROAD, transitionRadius);
 
-                    // Primeira e segunda camada SEMPRE light dirt
                     if (d == 1) {
                         farmMap[r][c] = TERRAIN_LIGHT_DIRT;
                     }
@@ -227,6 +259,24 @@ public class IndustrialFarmGame extends Application {
         stage.setTitle("Farm Simulator - Arado e Plantadeira");
         stage.setScene(scene);
         stage.show();
+    }
+
+    private void passDay() {
+        boolean changed = false;
+        for (int r = 0; r < MAP_SIZE; r++) {
+            for (int c = 0; c < MAP_SIZE; c++) {
+
+                if (farmMap[r][c] == TERRAIN_PLANTED) {
+                    farmMap[r][c] = TERRAIN_WHEAT;
+
+                    miniMapImage.getPixelWriter().setColor(c, r, Color.web("#d4af37"));
+                    changed = true;
+                }
+            }
+        }
+        if (changed) {
+            System.out.println("O tempo passou... A colheita está pronta!");
+        }
     }
 
     private void drawZoomButton(GraphicsContext gc, int size, double x, double y, String text) {
@@ -247,9 +297,9 @@ public class IndustrialFarmGame extends Application {
     }
 
     private void createTileCache() {
-        imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, false, false, null);
-        imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, false, false, null);
-        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, true, false, null);
+        imgRoadBorder = createSingleTileImage(Color.web("#808080"), 0, false, false, false, false, null);
+        imgRoad = createSingleTileImage(Color.web("#2c2c2c"), 0, false, false, false, false, null);
+        imgPlowed = createSingleTileImage(Color.web("#3d2611"), 0, false, true, false, false, null);
 
         Color grassColor = Color.web("#2d4c21");
         Color bladeColor = Color.web("#3a5f27");
@@ -258,10 +308,11 @@ public class IndustrialFarmGame extends Application {
         Color plowedColor = Color.web("#3d2611");
 
         for (int i = 0; i < 64; i++) {
-            grassVariants[i] = createSingleTileImage(grassColor, i, true, false, false, bladeColor);
-            darkGrassVariants[i] = createSingleTileImage(darkGrassColor, i, true, false, false, darkBladeColor);
-            plowedPebbleVariants[i] = createSingleTileImage(plowedColor, i, false, true, false, null);
-            seedlingVariants[i] = createSingleTileImage(plowedColor, i, false, false, true, null);
+            grassVariants[i] = createSingleTileImage(grassColor, i, true, false, false, false, bladeColor);
+            darkGrassVariants[i] = createSingleTileImage(darkGrassColor, i, true, false, false, false, darkBladeColor);
+            plowedPebbleVariants[i] = createSingleTileImage(plowedColor, i, false, true, false, false, null);
+            seedlingVariants[i] = createSingleTileImage(plowedColor, i, false, false, true, false, null);
+            wheatVariants[i] = createSingleTileImage(plowedColor, i, false, false, false, true, null);
         }
         for (int i = 0; i < 16; i++) {
             gravelVariants[i] = createHeavyGravelTile(Color.web("#453d33"), i);
@@ -318,7 +369,8 @@ public class IndustrialFarmGame extends Application {
     }
 
     private Image createSingleTileImage(Color baseColor, int seed, boolean hasGrass, boolean hasPebbles,
-            boolean hasSeedling, Color detailColor) {
+            boolean hasSeedling, boolean hasWheat, Color detailColor) {
+
         int w = TILE_SIZE * 2;
         int h = TILE_SIZE + 15;
         Canvas temp = new Canvas(w, h);
@@ -374,6 +426,34 @@ public class IndustrialFarmGame extends Application {
             tgc.moveTo(cx, cy);
             tgc.quadraticCurveTo(cx + 2, cy - len2 / 3, x2End, y2End);
             tgc.stroke();
+        }
+
+        if (hasWheat) {
+
+            Color wheatBase = Color.web("#d4af37");
+            Color wheatHighlight = Color.web("#f4d06f");
+
+            int count = 18 + rng.nextInt(8);
+
+            for (int i = 0; i < count; i++) {
+
+                double px = 4 + rng.nextDouble() * (TILE_SIZE * 1.6);
+                double py = off + 4 + rng.nextDouble() * (TILE_SIZE * 0.8);
+
+                double stalkH = 8 + rng.nextDouble() * 6;
+
+                double tilt = -2 + rng.nextDouble() * 4;
+
+                tgc.setLineCap(StrokeLineCap.BUTT);
+
+                tgc.setStroke(wheatBase.deriveColor(0, 1, 0.8 + rng.nextDouble() * 0.2, 1.0));
+                tgc.setLineWidth(1.5);
+                tgc.strokeLine(px, py, px + tilt, py - stalkH);
+
+                tgc.setStroke(wheatHighlight);
+                tgc.setLineWidth(2.2);
+                tgc.strokeLine(px + tilt, py - stalkH, px + tilt + (tilt * 0.2), py - stalkH - 3.5);
+            }
         }
 
         if (hasGrass && detailColor != null) {
@@ -457,6 +537,48 @@ public class IndustrialFarmGame extends Application {
             currentSpeed *= 0.5;
         }
 
+        gameTimeSeconds += dt * TIME_SCALE;
+
+        if (gameTimeSeconds >= 86400) {
+            gameTimeSeconds = 0;
+            gameDay++;
+            passDay();
+
+            if (gameDay > 30) {
+                gameDay = 1;
+                gameMonth++;
+                if (gameMonth > 12) {
+                    gameMonth = 1;
+                    gameYear++;
+                }
+            }
+        }
+
+        double hour = gameTimeSeconds / 3600.0;
+
+        if (hour >= 4 && hour < 6) {
+            nightAlpha = 1.0 - ((hour - 4.0) / 2.0) * 0.9;
+        }
+
+        else if (hour >= 6 && hour < 18) {
+            nightAlpha = 0.0;
+        }
+
+        else if (hour >= 18 && hour < 20) {
+            nightAlpha = ((hour - 18.0) / 2.0) * 0.85;
+        }
+
+        else {
+            nightAlpha = 0.85;
+        }
+
+        double shedCenterX = (SHED_X + SHED_W / 2.0) * TILE_SIZE;
+        double shedCenterY = (SHED_Y + SHED_H / 2.0) * TILE_SIZE;
+
+        double distToShed = Math.hypot(tractorX - shedCenterX, tractorY - shedCenterY);
+
+        isNearShed = (distToShed < 160);
+
         if (isAttached) {
             double dx = tractorX - trailerX, dy = tractorY - trailerY, dist = Math.sqrt(dx * dx + dy * dy);
             if (dist != TRAILER_DISTANCE) {
@@ -518,8 +640,6 @@ public class IndustrialFarmGame extends Application {
 
         for (int r = cRow - rad; r <= cRow + rad; r++) {
             for (int c = cCol - rad; c <= cCol + rad; c++) {
-                boolean underShed = c >= SHED_X && c < SHED_X + SHED_W &&
-                        r >= SHED_Y && r < SHED_Y + SHED_H;
                 double ix = (c * TILE_SIZE - r * TILE_SIZE);
                 double iy = (c * TILE_SIZE + r * TILE_SIZE) / 2.0;
                 if (ix > cameraX - 150 && ix < cameraX + WIDTH + 150 && iy > cameraY - 150
@@ -537,6 +657,8 @@ public class IndustrialFarmGame extends Application {
                             } else {
                                 if (farmMap[r][c] == TERRAIN_PLANTED) {
                                     img = seedlingVariants[noiseMap[r][c]];
+                                } else if (farmMap[r][c] == TERRAIN_WHEAT) {
+                                    img = wheatVariants[noiseMap[r][c]];
                                 } else if (farmMap[r][c] == TERRAIN_DIRT) {
                                     if (noiseMap[r][c] > 35) {
                                         img = plowedPebbleVariants[noiseMap[r][c]];
@@ -630,8 +752,46 @@ public class IndustrialFarmGame extends Application {
         drawTrees(gc, cCol, cRow, rad, false, tractorIsoY);
 
         gc.restore();
+        if (nightAlpha > 0.01) {
+
+            gc.setFill(Color.rgb(10, 10, 30, nightAlpha));
+            gc.fillRect(0, 0, WIDTH, HEIGHT);
+        }
+
         renderMiniMap(gc);
+        renderClock(gc);
         renderSpeedometer(gc);
+
+        if (isNearShed) {
+            renderShedUI(gc);
+        }
+    }
+
+    private void renderClock(GraphicsContext gc) {
+
+        int totalMinutes = (int) (gameTimeSeconds / 60);
+        int hours = totalMinutes / 60;
+        int minutes = totalMinutes % 60;
+
+        double clockX = WIDTH - 180;
+        double clockY = 220;
+
+        gc.setFill(Color.rgb(0, 0, 0, 0.7));
+        gc.fillRoundRect(clockX, clockY, 160, 60, 10, 10);
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(2);
+        gc.strokeRoundRect(clockX, clockY, 160, 60, 10, 10);
+
+        gc.setFill(Color.LIME);
+        gc.setFont(Font.font("Consolas", FontWeight.BOLD, 28));
+        gc.setTextAlign(TextAlignment.CENTER);
+        String timeStr = String.format("%02d:%02d", hours, minutes);
+        gc.fillText(timeStr, clockX + 80, clockY + 30);
+
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.NORMAL, 14));
+        String dateStr = String.format("Dia %d - Mês %d - Ano %d", gameDay, gameMonth, gameYear);
+        gc.fillText(dateStr, clockX + 80, clockY + 50);
     }
 
     private int distanceToTerrain(int r, int c, int terrainType, int maxDist) {
@@ -649,6 +809,43 @@ public class IndustrialFarmGame extends Application {
             }
         }
         return 999;
+    }
+
+    private void renderShedUI(GraphicsContext gc) {
+
+        double btnX = WIDTH - BTN_W - 20;
+
+        double btnY_Sleep = HEIGHT - BTN_H - 20;
+        double btnY_Tool = btnY_Sleep - BTN_H - 10;
+
+        drawButton(gc, btnX, btnY_Tool,
+                currentToolType == TOOL_PLOW ? "Equipar Plantadeira" : "Equipar Arado",
+                Color.web("#2c3e50"));
+
+        drawButton(gc, btnX, btnY_Sleep, "Dormir (Pular Noite)", Color.web("#8e44ad"));
+
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 14));
+        gc.setTextAlign(TextAlignment.RIGHT);
+        gc.fillText("MENU DO CELEIRO", WIDTH - 20, btnY_Tool - 10);
+    }
+
+    private void drawButton(GraphicsContext gc, double x, double y, String text, Color color) {
+
+        gc.setFill(Color.rgb(0, 0, 0, 0.5));
+        gc.fillRoundRect(x + 4, y + 4, BTN_W, BTN_H, 10, 10);
+
+        gc.setFill(color);
+        gc.fillRoundRect(x, y, BTN_W, BTN_H, 10, 10);
+
+        gc.setStroke(Color.WHITE);
+        gc.setLineWidth(2);
+        gc.strokeRoundRect(x, y, BTN_W, BTN_H, 10, 10);
+
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 16));
+        gc.setTextAlign(TextAlignment.CENTER);
+        gc.fillText(text, x + BTN_W / 2, y + BTN_H / 2 + 5);
     }
 
     private void drawIsoOverlay(GraphicsContext gc, double ix, double iy) {

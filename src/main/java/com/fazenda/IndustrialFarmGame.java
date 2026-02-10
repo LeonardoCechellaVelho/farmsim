@@ -2,6 +2,7 @@ package com.fazenda;
 
 import javafx.animation.AnimationTimer;
 import javafx.application.Application;
+import javafx.beans.value.ChangeListener;
 import javafx.scene.Scene;
 import javafx.scene.canvas.Canvas;
 import javafx.scene.canvas.GraphicsContext;
@@ -23,9 +24,12 @@ import java.util.Set;
 public class IndustrialFarmGame extends Application {
 
     private static final int TILE_SIZE = 12;
-    private static final int WIDTH = 1000;
-    private static final int HEIGHT = 700;
     private static final int MAP_SIZE = 200;
+
+    private double WIDTH = 800;
+    private double HEIGHT = 600;
+    private final double MAX_WIDTH = 1280;
+    private final double MAX_HEIGHT = 960;
 
     private static final int TERRAIN_GRASS = 0;
     private static final int TERRAIN_DIRT = 1;
@@ -99,7 +103,7 @@ public class IndustrialFarmGame extends Application {
     private final double BTN_W = 220;
     private final double BTN_H = 50;
 
-    private double gameTimeSeconds = 18 * 3600;
+    private double gameTimeSeconds = 6 * 3600;
     private int gameDay = 1;
     private int gameMonth = 1;
     private int gameYear = 1;
@@ -118,6 +122,38 @@ public class IndustrialFarmGame extends Application {
                 miniMapImage.getPixelWriter().setColor(c, r, Color.TRANSPARENT);
             }
         }
+
+        StackPane root = new StackPane();
+
+        root.setStyle("-fx-background-color: radial-gradient(center 50% 50%, radius 70%, #1a331a, #2d5a2d);");
+
+        Canvas canvas = new Canvas(WIDTH, HEIGHT);
+        javafx.scene.effect.DropShadow ds = new javafx.scene.effect.DropShadow();
+        ds.setColor(Color.rgb(0, 0, 0, 0.6));
+        ds.setRadius(20);
+        canvas.setEffect(ds);
+        GraphicsContext gc = canvas.getGraphicsContext2D();
+        root.getChildren().add(canvas);
+
+        Scene scene = new Scene(root, WIDTH, HEIGHT);
+
+        ChangeListener<Number> sizeListener = (observable, oldValue, newValue) -> {
+
+            WIDTH = Math.min(scene.getWidth(), MAX_WIDTH);
+
+            HEIGHT = Math.min(scene.getHeight(), MAX_HEIGHT);
+
+            canvas.setWidth(WIDTH);
+            canvas.setHeight(HEIGHT);
+
+        };
+
+        scene.widthProperty().addListener(sizeListener);
+        scene.heightProperty().addListener(sizeListener);
+
+        stage.setScene(scene);
+        stage.setTitle("Farm Simulator - Resolução Dinâmica");
+        stage.show();
 
         for (int r = 0; r < MAP_SIZE; r++) {
             for (int c = 0; c < MAP_SIZE; c++) {
@@ -184,11 +220,6 @@ public class IndustrialFarmGame extends Application {
         } catch (Exception e) {
             System.err.println("Erro: Imagens não encontradas. Verifique trator.png, trees.png e shed.png.");
         }
-
-        Canvas canvas = new Canvas(WIDTH, HEIGHT);
-        GraphicsContext gc = canvas.getGraphicsContext2D();
-        StackPane root = new StackPane(canvas);
-        Scene scene = new Scene(root);
 
         scene.setOnKeyPressed(e -> {
             activeKeys.add(e.getCode());
@@ -928,7 +959,7 @@ public class IndustrialFarmGame extends Application {
 
         gc.setFill(Color.WHITE);
         gc.setFont(Font.font("Arial", FontWeight.NORMAL, 10));
-        String dateStr = String.format("%02d/%02d - Ano %d", gameDay, gameMonth, gameYear);
+        String dateStr = String.format("Dia %02d - Mês %02d - Ano %d", gameDay, gameMonth, gameYear);
         gc.fillText(dateStr, clockX + clockW / 2, clockY + clockH + 12);
     }
 

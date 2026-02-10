@@ -93,11 +93,13 @@ public class IndustrialFarmGame extends Application {
     private long lastFrameTime = 0;
 
     private boolean isNearShed = false;
+    private boolean isHeadlightOn = false;
+    private final double LIGHT_DISTANCE = 450.0;
 
     private final double BTN_W = 220;
     private final double BTN_H = 50;
 
-    private double gameTimeSeconds = 6 * 3600;
+    private double gameTimeSeconds = 18 * 3600;
     private int gameDay = 1;
     private int gameMonth = 1;
     private int gameYear = 1;
@@ -192,6 +194,9 @@ public class IndustrialFarmGame extends Application {
             activeKeys.add(e.getCode());
             if (e.getCode() == KeyCode.C)
                 toggleCouping();
+            if (e.getCode() == KeyCode.F) {
+                isHeadlightOn = !isHeadlightOn;
+            }
         });
 
         scene.setOnKeyReleased(e -> activeKeys.remove(e.getCode()));
@@ -200,18 +205,33 @@ public class IndustrialFarmGame extends Application {
             double mx = e.getX();
             double my = e.getY();
 
+            double dashX = 120 + 90 + 20;
+            double dashY = HEIGHT - 50;
+
+            if (Math.hypot(mx - dashX, my - dashY) < 20) {
+                isHeadlightOn = !isHeadlightOn;
+            }
+
+            if (Math.hypot(mx - (dashX + 50), my - dashY) < 20) {
+                toggleCouping();
+            }
+
             if (isNearShed) {
                 double btnX = WIDTH - BTN_W - 20;
-
                 double btnY_Sleep = HEIGHT - BTN_H - 20;
                 double btnY_Tool = btnY_Sleep - BTN_H - 10;
 
                 if (mx >= btnX && mx <= btnX + BTN_W && my >= btnY_Tool && my <= btnY_Tool + BTN_H) {
-                    toggleTool();
+
+                    if (isAttached) {
+                        toggleTool();
+                    } else {
+                        System.out.println("Ação negada: Você precisa acoplar a ferramenta ao trator primeiro!");
+
+                    }
                 }
 
                 if (mx >= btnX && mx <= btnX + BTN_W && my >= btnY_Sleep && my <= btnY_Sleep + BTN_H) {
-
                     gameTimeSeconds = 6 * 3600;
                     gameDay++;
                     passDay();
@@ -554,10 +574,12 @@ public class IndustrialFarmGame extends Application {
             }
         }
 
-        double hour = gameTimeSeconds / 3600.0;
+        double hour = (gameTimeSeconds / 3600.0) % 24;
 
         if (hour >= 4 && hour < 6) {
-            nightAlpha = 1.0 - ((hour - 4.0) / 2.0) * 0.9;
+            double progress = (hour - 4.0) / 2.0;
+
+            nightAlpha = 0.6 * (1.0 - progress);
         }
 
         else if (hour >= 6 && hour < 18) {
@@ -565,11 +587,12 @@ public class IndustrialFarmGame extends Application {
         }
 
         else if (hour >= 18 && hour < 20) {
-            nightAlpha = ((hour - 18.0) / 2.0) * 0.85;
+            double progress = (hour - 18.0) / 2.0;
+            nightAlpha = 0.6 * progress;
         }
 
         else {
-            nightAlpha = 0.85;
+            nightAlpha = 0.6;
         }
 
         double shedCenterX = (SHED_X + SHED_W / 2.0) * TILE_SIZE;
@@ -758,40 +781,155 @@ public class IndustrialFarmGame extends Application {
             gc.fillRect(0, 0, WIDTH, HEIGHT);
         }
 
+        renderNightAndLights(gc);
         renderMiniMap(gc);
         renderClock(gc);
         renderSpeedometer(gc);
+        renderDashboardSwitches(gc);
 
         if (isNearShed) {
             renderShedUI(gc);
         }
     }
 
-    private void renderClock(GraphicsContext gc) {
+    private void renderDashboardSwitches(GraphicsContext gc) {
+        double cx = 130;
+        double cy = HEIGHT - 50;
 
-        int totalMinutes = (int) (gameTimeSeconds / 60);
-        int hours = totalMinutes / 60;
-        int minutes = totalMinutes % 60;
+        double lightX = cx + 90;
 
-        double clockX = WIDTH - 180;
-        double clockY = 220;
-
-        gc.setFill(Color.rgb(0, 0, 0, 0.7));
-        gc.fillRoundRect(clockX, clockY, 160, 60, 10, 10);
+        gc.setFill(isHeadlightOn ? Color.web("#2ecc71") : Color.web("#333"));
+        gc.fillOval(lightX, cy - 15, 30, 30);
         gc.setStroke(Color.WHITE);
         gc.setLineWidth(2);
-        gc.strokeRoundRect(clockX, clockY, 160, 60, 10, 10);
+        gc.strokeOval(lightX, cy - 15, 30, 30);
 
-        gc.setFill(Color.LIME);
-        gc.setFont(Font.font("Consolas", FontWeight.BOLD, 28));
-        gc.setTextAlign(TextAlignment.CENTER);
-        String timeStr = String.format("%02d:%02d", hours, minutes);
-        gc.fillText(timeStr, clockX + 80, clockY + 30);
+        gc.setStroke(isHeadlightOn ? Color.WHITE : Color.GRAY);
+        gc.setLineWidth(2);
+
+        gc.strokeArc(lightX + 15, cy - 8, 14, 16, 90, 180, ArcType.OPEN);
+
+        gc.strokeLine(lightX + 12, cy, lightX + 5, cy);
+        gc.strokeLine(lightX + 12, cy - 5, lightX + 5, cy - 7);
+        gc.strokeLine(lightX + 12, cy + 5, lightX + 5, cy + 7);
 
         gc.setFill(Color.WHITE);
-        gc.setFont(Font.font("Arial", FontWeight.NORMAL, 14));
-        String dateStr = String.format("Dia %d - Mês %d - Ano %d", gameDay, gameMonth, gameYear);
-        gc.fillText(dateStr, clockX + 80, clockY + 50);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 10));
+        gc.fillText("F", lightX + 12, cy + 25);
+
+        double couplerX = cx + 140;
+
+        Color couplerColor = Color.web("#333");
+        if (isAttached) {
+            couplerColor = Color.web("#2ecc71");
+        } else {
+
+            double backX = tractorX - Math.cos(Math.toRadians(angle)) * 30;
+            double backY = tractorY - Math.sin(Math.toRadians(angle)) * 30;
+            if (Math.hypot(backX - trailerX, backY - trailerY) < 35) {
+                couplerColor = Color.web("#e67e22");
+            }
+        }
+
+        gc.setFill(couplerColor);
+        gc.fillOval(couplerX, cy - 15, 30, 30);
+        gc.setStroke(Color.WHITE);
+        gc.strokeOval(couplerX, cy - 15, 30, 30);
+
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+        gc.setTextAlign(TextAlignment.CENTER);
+        gc.fillText("TLR", couplerX + 15, cy + 5);
+
+        gc.setFont(Font.font("Arial", FontWeight.BOLD, 10));
+        gc.fillText("C", couplerX + 15, cy + 25);
+    }
+
+    private void renderNightAndLights(GraphicsContext gc) {
+        if (nightAlpha < 0.01 && !isHeadlightOn)
+            return;
+
+        gc.save();
+        gc.setFill(Color.rgb(10, 10, 25, nightAlpha));
+        gc.fillRect(0, 0, WIDTH, HEIGHT);
+        gc.restore();
+
+        if (isHeadlightOn) {
+            gc.save();
+            gc.setGlobalBlendMode(javafx.scene.effect.BlendMode.SCREEN);
+
+            double screenX = WIDTH / 2.0;
+            double screenY = HEIGHT / 2.0;
+            double steppedAngle = Math.round(smoothedAngle / 15.0) * 15.0;
+
+            gc.translate(screenX, screenY);
+
+            gc.scale(1.0, 0.58);
+
+            double auraRadius = 65;
+            javafx.scene.paint.RadialGradient auraGrad = new javafx.scene.paint.RadialGradient(
+                    0, 0, 0, 0, auraRadius, false,
+                    javafx.scene.paint.CycleMethod.NO_CYCLE,
+                    new javafx.scene.paint.Stop(0.0, Color.rgb(255, 230, 150, 0.3)),
+                    new javafx.scene.paint.Stop(1.0, Color.TRANSPARENT));
+            gc.setFill(auraGrad);
+            gc.fillOval(-auraRadius, -auraRadius, auraRadius * 2, auraRadius * 2);
+
+            gc.rotate(steppedAngle + 30);
+
+            javafx.scene.paint.RadialGradient lightGrad = new javafx.scene.paint.RadialGradient(
+                    0, 0, 0, 0, LIGHT_DISTANCE, false,
+                    javafx.scene.paint.CycleMethod.NO_CYCLE,
+                    new javafx.scene.paint.Stop(0.0, Color.rgb(255, 240, 180, 0.25)),
+                    new javafx.scene.paint.Stop(0.8, Color.rgb(200, 180, 100, 0.1)),
+                    new javafx.scene.paint.Stop(1.0, Color.TRANSPARENT));
+            gc.setFill(lightGrad);
+
+            javafx.scene.effect.DropShadow softBlur = new javafx.scene.effect.DropShadow();
+            softBlur.setRadius(45);
+            softBlur.setOffsetX(0);
+            softBlur.setOffsetY(0);
+            softBlur.setColor(Color.rgb(255, 230, 150, 0.3));
+            gc.setEffect(softBlur);
+
+            gc.fillArc(-LIGHT_DISTANCE, -LIGHT_DISTANCE,
+                    LIGHT_DISTANCE * 2, LIGHT_DISTANCE * 2,
+                    -90, 135, ArcType.ROUND);
+
+            gc.restore();
+        }
+    }
+
+    private void renderClock(GraphicsContext gc) {
+
+        double clockW = 110;
+        double clockH = 45;
+        double clockX = WIDTH - clockW - 10;
+        double clockY = 180;
+
+        gc.setFill(Color.web("#1a1a1a"));
+        gc.fillRoundRect(clockX, clockY, clockW, clockH, 5, 5);
+
+        gc.setStroke(Color.web("#555"));
+        gc.setLineWidth(2);
+        gc.strokeRoundRect(clockX, clockY, clockW, clockH, 5, 5);
+
+        int totalMinutes = (int) (gameTimeSeconds / 60);
+        int hours = (totalMinutes / 60) % 24;
+        int minutes = totalMinutes % 60;
+        String timeStr = String.format("%02d:%02d", hours, minutes);
+
+        gc.setFill(Color.RED);
+
+        gc.setFont(Font.font("Monospaced", FontWeight.BOLD, 22));
+        gc.setTextAlign(TextAlignment.CENTER);
+
+        gc.fillText(timeStr, clockX + clockW / 2, clockY + 28);
+
+        gc.setFill(Color.WHITE);
+        gc.setFont(Font.font("Arial", FontWeight.NORMAL, 10));
+        String dateStr = String.format("%02d/%02d - Ano %d", gameDay, gameMonth, gameYear);
+        gc.fillText(dateStr, clockX + clockW / 2, clockY + clockH + 12);
     }
 
     private int distanceToTerrain(int r, int c, int terrainType, int maxDist) {
@@ -812,22 +950,29 @@ public class IndustrialFarmGame extends Application {
     }
 
     private void renderShedUI(GraphicsContext gc) {
-
         double btnX = WIDTH - BTN_W - 20;
-
         double btnY_Sleep = HEIGHT - BTN_H - 20;
         double btnY_Tool = btnY_Sleep - BTN_H - 10;
 
-        drawButton(gc, btnX, btnY_Tool,
-                currentToolType == TOOL_PLOW ? "Equipar Plantadeira" : "Equipar Arado",
-                Color.web("#2c3e50"));
+        String toolText = "";
+        Color toolBtnColor;
+
+        if (isAttached) {
+            toolText = (currentToolType == TOOL_PLOW) ? "Equipar Plantadeira" : "Equipar Arado";
+            toolBtnColor = Color.web("#2c3e50");
+        } else {
+            toolText = "Acople para Trocar";
+            toolBtnColor = Color.web("#7f8c8d");
+        }
+
+        drawButton(gc, btnX, btnY_Tool, toolText, toolBtnColor);
 
         drawButton(gc, btnX, btnY_Sleep, "Dormir (Pular Noite)", Color.web("#8e44ad"));
 
         gc.setFill(Color.WHITE);
         gc.setFont(Font.font("Arial", FontWeight.BOLD, 14));
         gc.setTextAlign(TextAlignment.RIGHT);
-        gc.fillText("MENU DO CELEIRO", WIDTH - 20, btnY_Tool - 10);
+        gc.fillText("OFICINA", WIDTH - 20, btnY_Tool - 10);
     }
 
     private void drawButton(GraphicsContext gc, double x, double y, String text, Color color) {
